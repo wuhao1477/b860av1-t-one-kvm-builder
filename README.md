@@ -1,80 +1,65 @@
 # B860 One-KVM Builder
 
-开箱即用的 B860AV1.1-T One-KVM 固件构建工具。
+B860AV1.1-T One-KVM 一键安装工具。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-English | [简体中文](README.zh-CN.md)
+[English](#english) | [简体中文](#简体中文)
 
-## 概述
+---
 
-基于以下项目构建 B860AV1.1-T 的 One-KVM 固件：
-- [B860 Armbian](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder) — 带 H.264 硬件编码器的基础系统
-- [One-KVM](https://github.com/mofeng-git/One-KVM) — IP-KVM 软件
+## 简体中文
 
-**特性：**
-- ✅ One-KVM 预装并启用
-- ✅ V4L2 硬件编码器预配置（`/dev/video0`）
-- ✅ 刷机即用 — 访问 `http://<设备IP>:8080`
+### 快速开始（推荐）
 
-## 本地构建
+**前提**：已刷入 [B860 Armbian v1.3.0](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/v1.3.0)
 
-在 Linux 环境下构建（需要原生 Linux 或 Docker）：
+在 B860 设备上运行一键安装脚本：
 
 ```bash
-# 前置依赖
-sudo apt-get install -y git curl jq xz-utils nodejs gcc-aarch64-linux-gnu \
-  mtools dosfstools e2fsprogs kmod device-tree-compiler
+# SSH 登录 B860（默认密码：password）
+ssh root@<B860-IP>
 
-# 安装 GitHub CLI
-# 参见: https://github.com/cli/cli#installation
+# 下载并运行安装脚本
+curl -fsSL https://raw.githubusercontent.com/wuhao1477/b860av1-t-one-kvm-builder/main/install-one-kvm.sh | bash
 
-# 克隆并构建
-git clone https://github.com/wuhao1477/b860av1-t-one-kvm-builder.git
-cd b860av1-t-one-kvm-builder
-
-# 运行构建（下载 B860 Armbian v1.3.0 + One-KVM 最新版，注入并重新打包）
-./scripts/build-one-kvm-local.sh
-
-# 输出: output/B860-One-KVM-*.burn.img.xz
+# 或者分步执行
+wget https://raw.githubusercontent.com/wuhao1477/b860av1-t-one-kvm-builder/main/install-one-kvm.sh
+chmod +x install-one-kvm.sh
+./install-one-kvm.sh
 ```
 
-构建耗时约 20-30 分钟（取决于下载速度和 CPU）。
+安装完成后访问：`http://<B860-IP>:8080`（默认凭据：`admin` / `admin`）
 
-## 架构
+### 手动安装
 
+```bash
+# 1. 下载 One-KVM
+wget https://github.com/mofeng-git/One-KVM/releases/download/v260802/one-kvm_0.2.6_armhf.deb
+
+# 2. 安装
+apt-get update
+apt-get install -y ./one-kvm_0.2.6_armhf.deb
+
+# 3. 配置硬件编码器
+mkdir -p /etc/one-kvm
+cat > /etc/one-kvm/encoder.conf << 'CONF'
+backend=v4l2m2m
+device=/dev/video0
+CONF
+
+# 4. 启动服务
+systemctl enable --now one-kvm
 ```
-输入：B860 Armbian v1.3.0 release
-  ↓
-克隆 B860 builder 仓库
-  ↓
-修改 apply-rootfs-defaults.sh（注入 One-KVM）
-  ↓
-下载 Armbian raw 镜像 + boot-components.json
-  ↓
-运行 build-burn-payloads.sh（ONE_KVM_DEB 环境变量）
-  ↓
-运行 build-vendor-boot-burn.sh
-  ↓
-输出：B860-One-KVM-*.burn.img.xz
+
+### 验证硬件编码器
+
+```bash
+v4l2-ctl -d /dev/video0 -D
+# 输出应包含：Driver name: meson_hcodec
 ```
 
-关键修改：`apply-rootfs-defaults.sh` 读取 `ONE_KVM_DEB` 环境变量并：
-1. 解压 One-KVM deb 到 rootfs
-2. 启用 systemd 服务
-3. 配置 `/etc/one-kvm/encoder.conf` 使用 V4L2 后端
-
-## 刷机
-
-1. 解压 `*.burn.img.xz`
-2. 打开 **晶晨 USB 烧录工具**
-3. 加载镜像，勾选 **"擦除 flash" + "擦除 bootloader"**
-4. B860 进入 USB 烧录模式，开始刷写
-5. 访问 One-KVM：`http://<设备IP>:8080`
-
-默认凭据：`admin` / `admin`
-
-## 硬件支持
+### 硬件支持
 
 继承所有 B860 Armbian 硬件支持：
 - Amlogic S905L3-B（四核 Cortex-A55，1.8 GHz）
@@ -82,30 +67,99 @@ cd b860av1-t-one-kvm-builder
 - 100 Mbps 有线网络、RTL8189FTV Wi-Fi
 - 8 GB eMMC、1 GB RAM
 
-详见 [B860 Armbian 文档](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder#hardware-support)。
+### 文档
 
-## 上游项目
+- [快速开始指南](QUICKSTART.md)
+- [故障排查](BUILDING.md#故障排查)
 
-- [**B860 Armbian**](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder) — 带硬件编码器的基础系统
-- [**One-KVM**](https://github.com/mofeng-git/One-KVM) — IP-KVM 软件
-- [**WS1608 One-KVM Builder**](https://github.com/wuhao1477/ws1608-one-kvm-builder) — 类似的 WS1608 构建器
-
-## 许可证
-
-MIT License — 详见 [LICENSE](LICENSE)
-
-包含组件：
-- B860 Armbian (MIT)
-- One-KVM (GPL-3.0)
-
-完整归属见 [THIRD_PARTY.md](THIRD_PARTY.md)。
-
-## 支持
+### 支持
 
 - **问题反馈**：[GitHub Issues](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/issues)
-- **上游 B860**：[B860 Armbian Issues](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/issues)
-- **上游 One-KVM**：[One-KVM Issues](https://github.com/mofeng-git/One-KVM/issues)
+- **上游 B860**：[B860 Armbian](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder)
+- **上游 One-KVM**：[One-KVM](https://github.com/mofeng-git/One-KVM)
 
 ---
 
-⚠️ **免责声明**：刷写自定义固件可能使保修失效。风险自负。
+## English
+
+### Quick Start (Recommended)
+
+**Prerequisites**: Flash [B860 Armbian v1.3.0](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/v1.3.0) first
+
+Run one-click installation script on B860 device:
+
+```bash
+# SSH to B860 (default password: password)
+ssh root@<B860-IP>
+
+# Download and run install script
+curl -fsSL https://raw.githubusercontent.com/wuhao1477/b860av1-t-one-kvm-builder/main/install-one-kvm.sh | bash
+
+# Or step by step
+wget https://raw.githubusercontent.com/wuhao1477/b860av1-t-one-kvm-builder/main/install-one-kvm.sh
+chmod +x install-one-kvm.sh
+./install-one-kvm.sh
+```
+
+Access One-KVM at: `http://<B860-IP>:8080` (default: `admin` / `admin`)
+
+### Manual Installation
+
+```bash
+# 1. Download One-KVM
+wget https://github.com/mofeng-git/One-KVM/releases/download/v260802/one-kvm_0.2.6_armhf.deb
+
+# 2. Install
+apt-get update
+apt-get install -y ./one-kvm_0.2.6_armhf.deb
+
+# 3. Configure hardware encoder
+mkdir -p /etc/one-kvm
+cat > /etc/one-kvm/encoder.conf << 'CONF'
+backend=v4l2m2m
+device=/dev/video0
+CONF
+
+# 4. Start service
+systemctl enable --now one-kvm
+```
+
+### Verify Hardware Encoder
+
+```bash
+v4l2-ctl -d /dev/video0 -D
+# Output should contain: Driver name: meson_hcodec
+```
+
+### Hardware Support
+
+Inherits all B860 Armbian hardware support:
+- Amlogic S905L3-B (quad-core Cortex-A55, 1.8 GHz)
+- H.264 hardware encoder (V4L2 M2M, up to 1920x1088)
+- 100 Mbps Ethernet, RTL8189FTV Wi-Fi
+- 8 GB eMMC, 1 GB RAM
+
+### Documentation
+
+- [Quickstart Guide](QUICKSTART.md)
+- [Troubleshooting](BUILDING.md#troubleshooting)
+
+### Support
+
+- **Issues**: [GitHub Issues](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/issues)
+- **Upstream B860**: [B860 Armbian](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder)
+- **Upstream One-KVM**: [One-KVM](https://github.com/mofeng-git/One-KVM)
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE)
+
+Incorporates:
+- B860 Armbian (MIT)
+- One-KVM (GPL-3.0)
+
+See [THIRD_PARTY.md](THIRD_PARTY.md).
+
+⚠️ **Disclaimer**: Custom firmware may void warranty. Use at your own risk.
