@@ -88,8 +88,20 @@ jobs:
       - name: Download B860 burn base image
         run: |
           mkdir -p downloads
-          # Download latest burn.img.xz from b860av1-t-armbian-burn-builder
-          gh release download \
+          # Download latest prerelease burn.img.xz
+          LATEST_BURN=$(gh release list \
+            --repo wuhao1477/b860av1-t-armbian-burn-builder \
+            --limit 10 \
+            --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease == true and (.tagName | startswith("b860-burn-")))] | first | .tagName')
+
+          if [[ -z "$LATEST_BURN" ]]; then
+            echo "Error: No burn prerelease found"
+            exit 1
+          fi
+
+          echo "Downloading from release: $LATEST_BURN"
+          gh release download "$LATEST_BURN" \
             --repo wuhao1477/b860av1-t-armbian-burn-builder \
             --pattern 'burn.img.xz' \
             --pattern 'SHA256SUMS' \
