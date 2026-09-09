@@ -1,41 +1,40 @@
 # B860AV1.1-T Armbian Builder
 
-[![CI](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/ci.yml/badge.svg)](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/ci.yml)
-[![Weekly burn image](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/weekly-burn-build.yml/badge.svg)](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/weekly-burn-build.yml)
-[![Weekly build](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/weekly-build.yml/badge.svg)](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/weekly-build.yml)
+[CNB repository](https://cnb.cool/wuhao1477/b860av1-t-armbian-burn-builder)
 
-面向中兴 `ZXV10 B860AV1.1-T` 的源输入固定、可追溯 Debian stable / Armbian 构建项目。所有大文件下载、镜像重构和 Linux 文件系统检查都在 GitHub Actions 中执行。
+面向中兴 `ZXV10 B860AV1.1-T` 的源输入固定、可追溯 Debian stable / Armbian 构建项目。所有大文件下载、镜像重构和 Linux 文件系统检查都在 CNB 流水线中执行。
 
 ## 当前状态
 
-**已冻结在 v1.1.0。** 上游输入（raw release、资产摘要、内核版本）全部钉死在实机验证过
+**已冻结在 v1.2.0。** 上游输入（raw release、资产摘要、内核版本）全部钉死在实机验证过
 的那一组，构建不再自己跟到新版本 —— 上游换了东西 CI 会红，而不是悄悄出一个没上过机的
 包。冻结集合和重钉步骤见 [`docs/frozen-inputs.md`](docs/frozen-inputs.md)。
 
 | 产物 | 状态 | 说明 |
 |---|---|---|
-| **`burn.img` 直刷包（变体 C）** | **`hardware-verified`** | 2026-09-03 实机刷入、进系统、六项预置全过、eMMC DDR52 82 MB/s；2026-09-04 换一次刷入复验；2026-09-05 `v1.1.0`（= `build-50.1`）再刷一次，七项预置全过（多了 H.264 硬解），见 [`docs/burn-image.md`](docs/burn-image.md) |
+| **`burn.img` 直刷包（变体 C）** | **`hardware-verified`** | 2026-09-03 实机刷入、进系统、六项预置全过、eMMC DDR52 82 MB/s；2026-09-04 换一次刷入复验；2026-09-05 `v1.1.0`（= `build-50.1`）再刷一次，七项预置全过（多了 H.264 硬解）；2026-09-06 `v1.2.0`（= `build-52.1`）再刷一次，八项全过（多了 H.264 硬编），见 [`docs/burn-image.md`](docs/burn-image.md) |
 | Armbian raw `.img.gz` | `container-valid / hardware-unverified` | 只做过容器与文件系统静态校验 |
 
-直接下载：[**`v1.1.0` 的 `burn.img.xz`**](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/latest)
-（解压后 `burn.img` sha256 `188d8ff6…`，七项预置全部实机验证通过：
-`root` / `password` 直接 SSH、zsh、根分区 5.1G、zram 400 MB、无首登向导、不等网络、H.264 硬解）。
+直接下载：[**`v1.2.0` 的 `burn.img.xz`**](https://cnb.cool/wuhao1477/b860av1-t-armbian-burn-builder/-/releases/latest)
+（解压后 `burn.img` sha256 `81eb5572…`，八项预置全部实机验证通过：
+`root` / `password` 直接 SSH、zsh、根分区 5.1G、zram 400 MB、无首登向导、不等网络、H.264 硬解 + 硬编）。
 刷之前先看 [`docs/burn-image.md#刷机步骤`](docs/burn-image.md)——**「擦除 flash」必须勾**。
 
-**要刷机只下 `latest`（现在是 `v1.1.0`）。** 其余 release 一律是 `Pre-release`，都不是
+**要刷机只下 `latest`（现在是 `v1.2.0`）。** 其余 release 一律是 `Pre-release`，都不是
 拿来刷的：
 
 | tag | 是什么 | 能刷吗 |
 |---|---|---|
-| `v1.1.0`（`latest`） | 直刷包，含 H.264 硬解微码，**这份字节流本身实机验证过** | **能** |
-| `v1.0.0` | 上一版直刷包，没有微码所以没有硬解，同样实机验证过 | 能 |
-| `b860-burn-*-build-N.M` | 每周自动出的直刷包，策略一致，但那些字节没上过机（`build-50.1` 除外，它就是 `v1.1.0`） | 自担风险 |
+| `v1.2.0`（`latest`） | 直刷包，含 H.264 硬解微码 + 硬编模块，**这份字节流本身实机验证过** | **能** |
+| `v1.1.0` | 上一版，有硬解没硬编，同样实机验证过 | 能 |
+| `v1.0.0` | 再上一版，没有微码所以没有硬解，同样实机验证过 | 能 |
+| `b860-burn-*-build-N.M` | 每周自动出的直刷包，策略一致，但那些字节没上过机（`build-50.1` / `build-52.1` 除外，它们就是 `v1.1.0` / `v1.2.0`） | 自担风险 |
 | `armbian-*-build-N.M` | raw `.img.gz` 线的每周产物，只做过容器与文件系统静态校验 | 不能直刷 |
 | `input-armbian-*` | 冻结的上游输入镜像，是构建的原料不是产物 | 否 |
 
 之前那批预置不完整的 `b860-burn-*`（`build-43.1` … `build-49.1`）已全部删除，避免有人
 下错来刷；`v1.0.0` 是 `build-49.1` 那份实机验证过的字节，`v1.1.0` 是 `build-50.1` 那份，
-各自同一个 sha256。各项预置是
+`v1.2.0` 是 `build-52.1` 那份，各自同一个 sha256。各项预置是
 怎么一步步补齐的，记在 [`docs/known-issues.md`](docs/known-issues.md) 第 7 条。
 
 **刷完直接能用，没有首次开机向导。** 镜像里由
@@ -50,7 +49,7 @@
 | swap | zram 400 MB（`armbian-zram-config`，靠 `sysinit.target.d` drop-in 起来） |
 | 开机 | 禁用 `NetworkManager-wait-online`，实机 24.3 s 进系统（首刷含 resize 30.6 s） |
 | 硬解 | `meson-vdec` 微码装在 `/lib/firmware/meson/vdec/`，H.264 实机解通（上游镜像里这个目录整个不存在，缺了 `VIDIOC_STREAMON` 直接 `-EINVAL`，见 [`docs/known-issues.md`](docs/known-issues.md) 第 10 条）。**`v1.1.0` 起才有，`v1.0.0` 里没有** |
-| 硬编 | 树外模块 `meson_hcodec.ko` 装在 `/lib/modules/<release>/extra/`，`stage=1 selftest=0` 开机自动加载，出来一个 V4L2 编码器节点（`ffmpeg -c:v h264_v4l2m2m` / `gst v4l2h264enc` 零补丁能用）。1280x768 十帧 GOP 实机 40.4~41.8 dB；ucode 在「太贵」的宏块上会卡死，驱动自己抬 QP 重编（细节见 [`docs/hcodec-encoder-plan.md`](docs/hcodec-encoder-plan.md)）。mainline 5.10 只有解码，编码这块硬件在上游内核里根本没有驱动。**下一个 tag 起才有** |
+| 硬编 | 树外模块 `meson_hcodec.ko` 装在 `/lib/modules/<release>/extra/`，`stage=1 selftest=0` 开机自动加载，出来一个 V4L2 编码器节点（`ffmpeg -c:v h264_v4l2m2m` / `gst v4l2h264enc` 零补丁能用）。1280x768 十帧 GOP 实机 40.4~41.8 dB；ucode 在「太贵」的宏块上会卡死，驱动自己抬 QP 重编（细节见 [`docs/hcodec-encoder-plan.md`](docs/hcodec-encoder-plan.md)）。mainline 5.10 只有解码，编码这块硬件在上游内核里根本没有驱动。**`v1.2.0` 起才有** |
 
 swap 为什么一开始没起来（构建时写进 rootfs 的 `*.wants` 符号链接一条都没进镜像，同一
 毫秒写的常规文件全在），见 [`docs/known-issues.md`](docs/known-issues.md) 第 7、8 条。
@@ -133,7 +132,7 @@ gh workflow run verify-device.yml \
 | raw 镜像 | `armbian-*` prerelease（直刷包的输入源） | [`weekly-build.yml`](.github/workflows/weekly-build.yml) |
 
 直刷包的输入自托管：那份实机验证过的 raw 资产逐字节镜像在本仓库的
-[`input-armbian-…-build-46.1`](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/input-armbian-26.11.0-debian-13.6-trixie-k5.10.268-build-46.1)
+[`input-armbian-…-build-46.1`](https://cnb.cool/wuhao1477/b860av1-t-armbian-burn-builder/-/releases/tags/input-armbian-26.11.0-debian-13.6-trixie-k5.10.268-build-46.1)
 里，`SOURCE_DIGEST` 与合并前完全一致。
 
 **直刷包的输入是冻结的。** `weekly-burn-build.yml` 顶部钉死 `SOURCE_REPOSITORY` /
@@ -169,10 +168,10 @@ gh workflow run verify-device.yml \
 - Tag 格式为 `armbian-<版本>-debian-<Debian完整版本>-<代号>-k<内核>-build-<运行号>.<重试号>`；同一版本可以重复构建且不会覆盖历史记录。
 - 每约 42 天只更新一次 `.github/schedule-heartbeat`，避免 GitHub 因 60 天无仓库活动而停用 schedule；该文件不进入构建指纹，单独变更时也不会触发 CI 编译或镜像构建。
 
-手动启动直刷包构建：打开 [Weekly burn image](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/weekly-burn-build.yml)，
-选择 **Run workflow**，把 `force` 设为 `true`。必须在默认分支上跑 —— `detect` 带
-`if: github.ref_name == default_branch`，feature 分支只会跑诊断 job，产不出包。
-raw 那条线是同一个仓库里的 [`weekly-build.yml`](.github/workflows/weekly-build.yml)。
+手动启动构建：打开 CNB 仓库页面的流水线按钮，选择 **Weekly raw build** 或
+**Weekly burn build**，需要强制重建时把 `force` 设为 `true`。设备证据使用
+**Verify device evidence**，输入 `release_tag`、`evidence_path` 和 `confirmation=verify`。
+配置入口见 [`.cnb.yml`](.cnb.yml) 和 [`.cnb/web_trigger.yml`](.cnb/web_trigger.yml)。
 
 ## burn.img 直刷包
 

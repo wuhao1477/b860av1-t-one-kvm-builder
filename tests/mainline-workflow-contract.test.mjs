@@ -52,7 +52,7 @@ test('public burn builder packages mainline BL33, FAT16 extlinux and sparse root
   assert.match(payloads, /boot-components\.json/);
   assert.match(payloads, /mformat/);
   assert.match(payloads, /extlinux\/extlinux\.conf/);
-  assert.match(payloads, /blkid --match-tag UUID --output value "\$root_part"/);
+  assert.match(payloads, /blkid --match-tag UUID --output value "\$tmp\/rootfs\.ext4"/);
   assert.match(payloads, /sparse-ext4-uuid/);
   assert.doesNotMatch(payloads, /bootloader\.PARTITION|embed-dos-mbr|gxlimg/);
   assert.match(ubootBuilder, /value\.uboot\.defconfig/);

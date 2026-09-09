@@ -150,9 +150,8 @@ driver   Meson GXL Internal PHY
 `tests/mainline-workflow-contract.test.mjs` 里有一条断言禁止变体 A/B 的脚本名再出现在
 这个 workflow 里。
 
-注意 `weekly-burn-build.yml` 的 `build` job 依赖 `detect`，而 `detect` 带
-`if: github.ref_name == github.event.repository.default_branch` —— **在 feature 分支上
-dispatch 只会跑诊断 job，产不出包**，要在默认分支上才能验证。
+注意 CNB 的 `weekly-burn-build.sh` 只从默认分支发布 weekly 产物；feature 分支只用于检查，
+不会发布产物。
 
 ## 7. 板上手改的三项修复扛不住重刷
 

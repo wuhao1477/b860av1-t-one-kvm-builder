@@ -83,11 +83,21 @@ cleanup() { rm -rf -- "$tmp_dir"; }
 trap cleanup EXIT
 source_dir="$tmp_dir/source"
 build_dir="$tmp_dir/build"
-git clone --filter=blob:none --no-checkout --quiet "$repository_url" "$source_dir"
-git -C "$source_dir" fetch --quiet --depth=1 origin "$source_commit"
-git -C "$source_dir" checkout --detach --quiet "$source_commit"
-[[ "$(git -C "$source_dir" rev-parse HEAD)" == "$source_commit" ]] || {
-  echo 'exact U-Boot checkout failed' >&2
+for attempt in 1 2 3 4 5; do
+  rm -rf -- "$source_dir"
+  if git clone --filter=blob:none --no-checkout --quiet "$repository_url" "$source_dir" \
+    && git -C "$source_dir" fetch --quiet --depth=1 origin "$source_commit" \
+    && git -C "$source_dir" checkout --detach --quiet "$source_commit" \
+    && [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$source_commit" ]]; then
+    break
+  fi
+  if (( attempt < 5 )); then
+    echo "retrying U-Boot source fetch ($attempt/5)" >&2
+    sleep "$((attempt * 2))"
+  fi
+done
+[[ -d "$source_dir/.git" && "$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)" == "$source_commit" ]] || {
+  echo 'exact U-Boot checkout failed after 5 attempts' >&2
   exit 1
 }
 git -C "$source_dir" apply --check "$patch_path"

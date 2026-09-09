@@ -1,0 +1,165 @@
+.node-build: &node-build
+  docker:
+    image: node:22-bookworm
+  runner:
+    cpus: 8
+
+.weekly-build: &weekly-build
+  <<: *node-build
+  lock:
+    key: b860-weekly-build
+    wait: true
+    cancel-in-wait: true
+  stages:
+    - name: raw setup
+      timeout: 15m
+      script: bash scripts/cnb-weekly-raw-build.sh setup
+    - name: raw detect
+      timeout: 15m
+      script: bash scripts/cnb-weekly-raw-build.sh detect
+      exports:
+        changed: CNB_RAW_CHANGED
+        fingerprint: CNB_RAW_FINGERPRINT
+    - name: raw build
+      if: '[ "$CNB_RAW_CHANGED" = "true" ]'
+      timeout: 2h
+      script: bash scripts/cnb-weekly-raw-build.sh build
+    - name: raw validate
+      if: '[ "$CNB_RAW_CHANGED" = "true" ]'
+      timeout: 2h
+      script: bash scripts/cnb-weekly-raw-build.sh validate
+    - name: raw publish
+      if: '[ "$CNB_RAW_CHANGED" = "true" ]'
+      timeout: 30m
+      script: bash scripts/cnb-weekly-raw-build.sh publish
+  endStages:
+    - name: refresh schedule heartbeat
+      if: '[ "$CNB_IS_CRONEVENT" = "true" ]'
+      script: bash scripts/cnb-heartbeat.sh
+
+.weekly-burn: &weekly-burn
+  <<: *node-build
+  lock:
+    key: b860-weekly-burn
+    wait: true
+    cancel-in-wait: true
+  stages:
+    - name: burn setup
+      timeout: 15m
+      script: bash scripts/cnb-weekly-burn-build.sh setup
+    - name: burn detect
+      timeout: 15m
+      script: bash scripts/cnb-weekly-burn-build.sh detect
+      exports:
+        changed: CNB_BURN_CHANGED
+        fingerprint: CNB_BURN_FINGERPRINT
+    - name: burn build
+      if: '[ "$CNB_BURN_CHANGED" = "true" ]'
+      timeout: 2h
+      script: bash scripts/cnb-weekly-burn-build.sh build
+    - name: burn publish
+      if: '[ "$CNB_BURN_CHANGED" = "true" ]'
+      timeout: 30m
+      script: bash scripts/cnb-weekly-burn-build.sh publish
+
+.ci-test: &ci-test
+  <<: *node-build
+  lock:
+    key: cnb-ci-test-$CNB_BRANCH
+    cancel-in-progress: true
+  stages:
+    - name: test
+      script: bash scripts/cnb-ci.sh test
+
+.ci-source-built-uboot: &ci-source-built-uboot
+  <<: *node-build
+  lock:
+    key: cnb-ci-uboot-$CNB_BRANCH
+    cancel-in-progress: true
+  stages:
+    - name: source-built-uboot
+      script: bash scripts/cnb-ci.sh source-built-uboot
+
+main:
+  "crontab: 23 3 * * 1":
+    - name: weekly-raw
+      <<: *weekly-build
+    - name: weekly-burn
+      <<: *weekly-burn
+
+"**":
+  push:
+    - name: ci-test
+      <<: *ci-test
+      ifModify:
+        - "**"
+        - "!(.github/schedule-heartbeat)"
+    - name: ci-source-built-uboot
+      <<: *ci-source-built-uboot
+      ifModify:
+        - "**"
+        - "!(.github/schedule-heartbeat)"
+  pull_request:
+    - name: ci-test
+      <<: *ci-test
+    - name: ci-source-built-uboot
+      <<: *ci-source-built-uboot
+    - name: device-evidence-pr
+      <<: *node-build
+      ifModify:
+        - "evidence/**"
+        - "!(evidence/.gitkeep)"
+      stages:
+        - name: device evidence PR validation
+          script: bash scripts/cnb-device-evidence-pr.sh
+
+$:
+  api_trigger:
+    - name: api-ci-test
+      <<: *ci-test
+    - name: api-ci-source-built-uboot
+      <<: *ci-source-built-uboot
+  api_trigger_weekly_raw:
+    - name: api-weekly-raw
+      <<: *weekly-build
+  api_trigger_weekly_burn:
+    - name: api-weekly-burn
+      <<: *weekly-burn
+  api_trigger_migrate_releases:
+    - name: migrate-github-releases
+      <<: *node-build
+      lock:
+        key: cnb-release-migration
+        wait: true
+        cancel-in-wait: true
+      stages:
+        - name: migrate GitHub releases to CNB
+          timeout: 12h
+          script: |
+            apt-get update
+            apt-get install --yes curl
+            node scripts/migrate-github-releases.mjs
+  web_trigger_weekly_raw:
+    - name: weekly-raw-manual
+      <<: *weekly-build
+  web_trigger_weekly_burn:
+    - name: weekly-burn-manual
+      <<: *weekly-burn
+  web_trigger_verify_device:
+    - name: verify-device-manual
+      <<: *node-build
+      stages:
+        - name: require confirmation
+          script: '[ "$confirmation" = "verify" ] || { echo "confirmation must equal verify" >&2; exit 1; }'
+        - name: verify setup
+          timeout: 15m
+          script: bash scripts/cnb-verify-device.sh setup
+        - name: validate device evidence
+          timeout: 15m
+          script: bash scripts/cnb-verify-device.sh validate
+          exports:
+            validated: CNB_DEVICE_VALIDATED
+        - name: publish device evidence
+          if: '[ "$CNB_DEVICE_VALIDATED" = "true" ]'
+          timeout: 15m
+          script: bash scripts/cnb-verify-device.sh publish

@@ -11,11 +11,11 @@ const execFile = promisify(execFileCallback);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const audit = join(root, 'scripts/audit-public-releases.sh');
 
-const fakeGh = `#!/usr/bin/env bash
+const fakeNode = `#!/usr/bin/env bash
 set -Eeuo pipefail
-printf '%s\n' "$*" >> "$GH_LOG"
-[[ "\${GH_MODE:-empty}" != fail ]] || exit 1
-[[ "$1 $2" == 'release list' ]] || exit 2
+printf '%s\n' "$*" >> "$NODE_LOG"
+[[ "\${NODE_MODE:-empty}" != fail ]] || exit 1
+printf '%s\n' 'public release audit: no published Armbian prereleases'
 `;
 
 const fakeSleep = `#!/usr/bin/env bash
@@ -26,53 +26,53 @@ async function setup() {
   const directory = await mkdtemp(join(tmpdir(), 'b860-release-audit-'));
   const bin = join(directory, 'bin');
   await mkdir(bin);
-  const gh = join(bin, 'gh');
+  const node = join(bin, 'node');
   const sleep = join(bin, 'sleep');
-  await writeFile(gh, fakeGh);
+  await writeFile(node, fakeNode);
   await writeFile(sleep, fakeSleep);
-  await chmod(gh, 0o755);
+  await chmod(node, 0o755);
   await chmod(sleep, 0o755);
-  return { bin, directory, log: join(directory, 'gh.log') };
+  return { bin, directory, log: join(directory, 'node.log') };
 }
 
 function environment(paths, mode) {
   return {
     ...process.env,
-    GH_LOG: paths.log,
-    GH_MODE: mode,
-    GH_TOKEN: 'test-token',
-    GITHUB_REPOSITORY: 'owner/repository',
+    NODE_LOG: paths.log,
+    NODE_MODE: mode,
+    CNB_REPO_SLUG: 'owner/repository',
+    CNB_TOKEN: 'test-token',
     PATH: `${paths.bin}:${process.env.PATH}`,
   };
 }
 
-test('public release audit accepts an empty new repository', async () => {
+test('public release audit accepts an empty CNB repository', async () => {
   const paths = await setup();
   try {
     const { stdout } = await execFile(audit, [], { cwd: root, env: environment(paths, 'empty') });
     assert.match(stdout, /no published Armbian prereleases/);
-    assert.match(await readFile(paths.log, 'utf8'), /^release list /);
+    assert.match(await readFile(paths.log, 'utf8'), /scripts\/cnb-release-audit\.mjs/);
   } finally {
     await rm(paths.directory, { recursive: true, force: true });
   }
 });
 
-test('public release audit fails closed after GitHub query retries are exhausted', async () => {
+test('public release audit fails closed when the CNB audit fails', async () => {
   const paths = await setup();
   try {
     await assert.rejects(
       execFile(audit, [], { cwd: root, env: environment(paths, 'fail') }),
       (error) => error.code === 1,
     );
-    const calls = (await readFile(paths.log, 'utf8')).trim().split('\n');
-    assert.equal(calls.length, 5);
+    assert.match(await readFile(paths.log, 'utf8'), /scripts\/cnb-release-audit\.mjs/);
   } finally {
     await rm(paths.directory, { recursive: true, force: true });
   }
 });
 
-test('public release audit downloads metadata only', async () => {
+test('public release audit delegates project Release access to CNB', async () => {
   const source = await readFile(audit, 'utf8');
-  assert.match(source, /--pattern resolved-sources\.json --pattern validation-report\.json/);
-  assert.doesNotMatch(source, /--pattern [^\n]*\.img\.gz/);
+  assert.match(source, /CNB_REPO_SLUG/);
+  assert.match(source, /cnb-release-audit\.mjs/);
+  assert.doesNotMatch(source, /gh release/);
 });

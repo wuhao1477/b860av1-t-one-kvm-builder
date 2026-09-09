@@ -5,11 +5,12 @@ Burning Tool 能直接刷的 `burn.img`，刷完开机就是 Debian/Armbian。
 
 ## 当前状态
 
-**变体 C 已在实机验证。** 交付的那一份是 `v1.1.0`（构建序号 `build-50.1`），`burn.img` sha256
-`188d8ff6ea26694eb565759c3a0fc477c432529ce6055beac524b2c8c1b2bccf`。刷完直接进系统，
-不走首次开机向导，七项预置全部实机确认（2026-09-03 首次，2026-09-04 换一次刷入复验，
-2026-09-05 `v1.1.0` 再刷一次并验通 H.264 硬解）。下面这份读数取自 `v1.0.0` 那次
-（当时接着屏和 WiFi），`v1.1.0` 的 DTB / 内核 / bootloader 与它完全相同：
+**变体 C 已在实机验证。** 交付的那一份是 `v1.2.0`（构建序号 `build-52.1`），`burn.img` sha256
+`81eb5572c66ece1a8b6798a69c2ec5cd8cd7066da1124115e74eae17e1061462`。刷完直接进系统，
+不走首次开机向导，八项预置全部实机确认（2026-09-03 首次，2026-09-04 换一次刷入复验，
+2026-09-05 `v1.1.0` 再刷一次并验通 H.264 硬解，2026-09-06 `v1.2.0` 再刷一次并验通
+H.264 硬编）。下面这份读数取自 `v1.0.0` 那次
+（当时接着屏和 WiFi），`v1.1.0` / `v1.2.0` 的 DTB / 内核 / bootloader 与它完全相同：
 
 ```
 Armbian OS 26.11.0 trixie / Debian GNU/Linux 13
@@ -206,11 +207,16 @@ git log --oneline main..refs/archive/feat-diagnostic-hdmi-console   # HDMI 诊�
 
 ## 构建与校验
 
+构建只需要 Linux 用户态工具：`e2fsprogs`、`mtools`、`dosfstools`、`gzip`、`dd` 和
+Node.js。脚本从 raw 镜像的 MBR 读取分区边界，用 `dd` 抽取 FAT 与 ext4 文件；rootfs
+通过 `debugfs rdump` 导出到普通目录，在普通目录执行预置脚本，再按文件树差异同步回
+原 ext4。全过程不需要 loop 设备、FUSE 或挂载权限。
+
 ```bash
 # 一次性：按 config 里钉死的 commit 编出 ampack / gxlimg 并加进 PATH
 eval "$(scripts/setup-image-tools.sh)"
 
-# 1. 从公开 Armbian raw 镜像做出两个载荷（需要 Linux + loop 分区支持）
+# 1. 从公开 Armbian raw 镜像做出两个载荷
 scripts/build-burn-payloads.sh <Armbian_*.img.gz> payloads
 
 # 2. 套上原厂 bootloader 打包
@@ -225,9 +231,10 @@ scripts/validate-vendor-boot-burn.sh out/burn.img out/vendor-boot-contract.json
 `burn-dtb-contract.json`。变体 A/B 的脚本不在发布路径里，有测试断言守着。
 输入是钉死的：`detect` 只核对 `SOURCE_RELEASE` / `SOURCE_ASSET` / `SOURCE_DIGEST`，
 上游换了东西就红，不会自己跟到新的 raw release（[`frozen-inputs.md`](frozen-inputs.md)）。
-`build-burn-payloads.sh` 里还会在 rootfs 上跑
-[`apply-rootfs-defaults.sh`](../scripts/apply-rootfs-defaults.sh) 做预置，并在 `dd` 之后用
-`debugfs` 复查 drop-in 真的在要写进 eMMC 的那份 ext4 里。预置里有一样是自己编的：
+`build-burn-payloads.sh` 先用 `debugfs rdump` 导出 rootfs，在普通目录上运行
+[`apply-rootfs-defaults.sh`](../scripts/apply-rootfs-defaults.sh)，再由
+`sync-rootfs-tree.mjs` 将新增、删除和修改按文件树差异写回要写进 eMMC 的那份 ext4。
+同步后运行 `e2fsck`，最后用 `debugfs` 复查 drop-in 确实存在。预置里有一样是自己编的：
 树外的 H.264 硬件编码模块 `meson_hcodec.ko`（[`scripts/build-hcodec-module.sh`](../scripts/build-hcodec-module.sh)
 在 runner 上交叉编，9 秒），装到 `/lib/modules/<release>/extra/` 并 `depmod -b`，
 `stage=1 selftest=0` 开机自动加载 —— mainline 5.10 只有解码，见

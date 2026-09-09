@@ -22,6 +22,8 @@ const apiAttempts = 5;
 const retryableStatuses = new Set([408, 425, 429, 500, 502, 503, 504]);
 const recipeFiles = [
   'THIRD_PARTY_SOURCES.md',
+  '.cnb.yml',
+  '.cnb/web_trigger.yml',
   '.github/workflows/device-evidence-pr.yml',
   '.github/workflows/verify-device.yml',
   '.github/workflows/weekly-build.yml',
@@ -37,6 +39,13 @@ const recipeFiles = [
   'patches/u-boot/README.md',
   'patches/u-boot/u-boot-s905x-s912.patch',
   'scripts/audit-public-releases.sh',
+  'scripts/cnb-heartbeat.sh',
+  'scripts/cnb-release-audit.mjs',
+  'scripts/cnb-release.mjs',
+  'scripts/cnb-run-identity.mjs',
+  'scripts/cnb-weekly-raw-build.sh',
+  'scripts/cnb-weekly-burn-build.sh',
+  'src/cnb-release.mjs',
   'scripts/build-raw-image.sh',
   'scripts/build-board-dtb.sh',
   'scripts/build-uboot-overload.sh',

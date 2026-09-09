@@ -119,7 +119,7 @@ v4l2-ctl -d /dev/video0 --stream-mmap --stream-out-mmap 4 --stream-count 3 \
   --stream-from /tmp/in.nv12 --stream-to /tmp/out.h264 2>&1
 ls -l /tmp/out.h264 2>&1
 echo '---- v4l2-compliance ----'
-v4l2-compliance -d /dev/video0 2>&1
+v4l2-compliance -d /dev/video0 -s2 2>&1
 echo "HCV4L2_DONE"
 poweroff -f
 EOF

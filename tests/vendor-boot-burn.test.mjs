@@ -55,6 +55,15 @@ test('image tool bootstrap pins ampack and gxlimg to the configured commits', ()
   assert.match(script, /rev-parse HEAD/);
 });
 
+test('image tool bootstrap retries transient git checkout failures', () => {
+  const script = read('scripts/setup-image-tools.sh');
+
+  assert.match(script, /for attempt in 1 2 3 4 5/);
+  assert.match(script, /git clone --quiet --filter=blob:none/);
+  assert.match(script, /git -C "\$target" checkout --quiet --detach "\$commit"/);
+  assert.match(script, /sleep "\$\(\(attempt \* 2\)\)"/);
+});
+
 test('command line ends with console=tty0 because the board has no usable serial port', () => {
   const cmdline = createBootCommandLine(1024, '3e900a5c-42af-4f1f-a78e-e4a8efad2459');
   const consoles = cmdline.match(/console=\S+/g);

@@ -21,35 +21,77 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 metadata="$(dirname -- "$raw")/boot-components.json"
 [[ -f "$raw" && -f "$metadata" ]] || { echo 'raw image or boot-components.json not found' >&2; exit 1; }
 
-for command in blkid debugfs depmod fdtget gzip losetup mcopy mformat mmd node sha256sum; do
+for command in blkid debugfs dd depmod e2fsck fdtget gzip mcopy mformat mmd node sha256sum; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 
 mkdir -p "$package"
 tmp=$(mktemp -d)
-loop=''
-root_mount="$tmp/root"
-boot_mount="$tmp/source-boot"
 cleanup() {
   set +e
-  mountpoint -q "$root_mount" && sudo umount "$root_mount"
-  mountpoint -q "$boot_mount" && sudo umount "$boot_mount"
-  [[ -n "$loop" ]] && sudo losetup -d "$loop"
   rm -rf "$tmp"
 }
 trap cleanup EXIT
 
 gzip -dc "$raw" > "$tmp/raw.img"
-loop=$(sudo losetup --find --show --partscan "$tmp/raw.img")
-sudo udevadm settle
-mapfile -t parts < <(lsblk --noheadings --list --output NAME,TYPE "$loop" \
-  | awk '$2 == "part" {print "/dev/" $1}')
-[[ ${#parts[@]} -eq 2 ]] || { echo 'raw image must have exactly boot and root partitions' >&2; exit 1; }
-boot_part=${parts[0]}
-root_part=${parts[1]}
-mkdir -p "$boot_mount" "$root_mount"
-sudo mount -o ro "$boot_part" "$boot_mount"
-sudo mount -o rw "$root_part" "$root_mount"
+mapfile -t layout < <(node - "$tmp/raw.img" <<'NODE'
+const fs = require('node:fs');
+
+const imagePath = process.argv[2];
+const imageSize = fs.statSync(imagePath).size;
+const fd = fs.openSync(imagePath, 'r');
+const mbr = Buffer.alloc(512);
+try {
+  if (fs.readSync(fd, mbr, 0, mbr.length, 0) !== mbr.length) {
+    throw new Error('raw image MBR is truncated');
+  }
+} finally {
+  fs.closeSync(fd);
+}
+if (mbr.readUInt16LE(510) !== 0xaa55) throw new Error('raw image does not contain a DOS MBR');
+
+const partitions = [];
+for (let index = 0; index < 4; index += 1) {
+  const offset = 446 + (index * 16);
+  const type = mbr[offset + 4];
+  const startLba = mbr.readUInt32LE(offset + 8);
+  const sectors = mbr.readUInt32LE(offset + 12);
+  if (type === 0 && startLba === 0 && sectors === 0) continue;
+  if (type === 0 || startLba === 0 || sectors === 0) {
+    throw new Error(`partition ${index + 1} has an incomplete MBR entry`);
+  }
+  if ((startLba + sectors) * 512 > imageSize) {
+    throw new Error(`partition ${index + 1} extends beyond the raw image`);
+  }
+  partitions.push({ type, startLba, sectors });
+}
+if (partitions.length !== 2 || partitions[0].type !== 0x0c || partitions[1].type !== 0x83) {
+  throw new Error('raw image must contain one FAT32 LBA boot partition followed by one ext4 root partition');
+}
+for (const partition of partitions) console.log(`${partition.startLba} ${partition.sectors}`);
+NODE
+)
+[[ ${#layout[@]} -eq 2 ]] || { echo 'raw image must have exactly boot and root partitions' >&2; exit 1; }
+read -r boot_start boot_sectors <<<"${layout[0]}"
+read -r root_start root_sectors <<<"${layout[1]}"
+dd if="$tmp/raw.img" of="$tmp/source-boot.PARTITION" \
+  bs=512 skip="$boot_start" count="$boot_sectors" status=none
+dd if="$tmp/raw.img" of="$tmp/rootfs.ext4" \
+  bs=512 skip="$root_start" count="$root_sectors" status=none
+root_size=$((root_sectors * 512))
+
+root_uuid=$(blkid --match-tag UUID --output value "$tmp/rootfs.ext4" | tr '[:upper:]' '[:lower:]')
+[[ "$root_uuid" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || {
+  echo 'source root filesystem UUID is invalid' >&2
+  exit 1
+}
+mkdir -p "$tmp/root-before" "$tmp/root-tree"
+debugfs -R "rdump / $tmp/root-before" "$tmp/rootfs.ext4" >/dev/null
+cp -a "$tmp/root-before/." "$tmp/root-tree/"
+sed -i '\@[[:space:]]/boot[[:space:]]@d' "$tmp/root-tree/etc/fstab" 2>/dev/null || true
+SUDO= "$root/scripts/apply-rootfs-defaults.sh" "$tmp/root-tree"
+node "$root/scripts/sync-rootfs-tree.mjs" \
+  "$tmp/rootfs.ext4" "$tmp/root-before" "$tmp/root-tree" >/dev/null
 
 board_dtb=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).dtb)' \
   "$root/config/board.json")
@@ -71,29 +113,24 @@ mapfile -t components < <(node -e '
   pick("dtb", (value) => value === dtbPath);
 ' "$metadata" "$board_dtb")
 [[ ${#components[@]} -eq 6 ]] || { echo 'boot component selection failed' >&2; exit 1; }
-kernel="$boot_mount/${components[0]}"
-initrd="$boot_mount/${components[2]}"
-dtb="$boot_mount/${components[4]}"
+boot_tree="$tmp/boot-tree"
+kernel="$boot_tree/${components[0]}"
+initrd="$boot_tree/${components[2]}"
+dtb="$boot_tree/${components[4]}"
 for index in 0 1 2; do
   path_index=$((index * 2))
   digest_index=$((path_index + 1))
   file=${components[$path_index]}
-  printf '%s  %s\n' "${components[$digest_index]}" "$boot_mount/$file" \
+  boot_file="$boot_tree/$file"
+  mkdir -p "$(dirname -- "$boot_file")"
+  mcopy -i "$tmp/source-boot.PARTITION" "::/$file" "$boot_file"
+  printf '%s  %s\n' "${components[$digest_index]}" "$boot_file" \
     | sha256sum --check --status
 done
 
-root_uuid=$(sudo blkid --match-tag UUID --output value "$root_part" | tr '[:upper:]' '[:lower:]')
-[[ "$root_uuid" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || {
-  echo 'source root filesystem UUID is invalid' >&2
-  exit 1
-}
-root_size=$(sudo blockdev --getsize64 "$root_part")
-sudo sed -i '\@[[:space:]]/boot[[:space:]]@d' "$root_mount/etc/fstab" 2>/dev/null || true
-"$root/scripts/apply-rootfs-defaults.sh" "$root_mount"
-
 # 镜像里那颗内核的 release，下面复查 hcodec 模块要用。apply-rootfs-defaults.sh §7
 # 已经断言过只有一颗，这里只是取名字。
-kernel_release=$(basename -- "$(echo "$root_mount"/lib/modules/*/)")
+kernel_release=$(basename -- "$(echo "$tmp/root-tree"/lib/modules/*/)")
 hcodec_ko="/lib/modules/$kernel_release/extra/meson_hcodec.ko"
 
 node "$root/scripts/burn-image.mjs" prepare-kernel "$kernel" "$tmp/Image.gz" >/dev/null
@@ -117,15 +154,11 @@ mcopy -o -i "$package/boot.PARTITION" "$tmp/linux.dtb" "::dtb/amlogic/$board_dtb
 mcopy -o -i "$package/boot.PARTITION" "$tmp/extlinux.conf" ::extlinux/extlinux.conf
 node "$root/scripts/burn-image.mjs" check-fat-boot "$package/boot.PARTITION" >/dev/null
 
-sudo sync
-sudo umount "$boot_mount"
-sudo umount "$root_mount"
 set +e
-sudo e2fsck -pf "$root_part"
+e2fsck -pf "$tmp/rootfs.ext4"
 fsck_status=$?
 set -e
 [[ "$fsck_status" -le 1 ]] || { echo "root filesystem check failed: $fsck_status" >&2; exit 1; }
-sudo dd if="$root_part" of="$tmp/rootfs.ext4" bs=4M status=none
 
 # 预置项必须真的躺在要写进 eMMC 的那份 ext4 里，光看 apply-rootfs-defaults.sh 的
 # 日志不算数：build-47.1 打印了「启用」、e2fsck 报干净，实机上两条 *.wants 符号
@@ -140,7 +173,7 @@ mapfile -t vdec_blobs < <(node -e '
   for (const file of Object.keys(spec.files)) console.log(`${spec.installPath}/${file}`);
 ' "$root/config/board.json")
 for dropin in "$zram_dropin" "$expand_dropin" "${vdec_blobs[@]}" "$hcodec_ko"; do
-  sudo debugfs -R "stat $dropin" "$tmp/rootfs.ext4" 2>&1 | grep -q '^Inode:' || {
+  debugfs -R "stat $dropin" "$tmp/rootfs.ext4" 2>&1 | grep -q '^Inode:' || {
     echo "drop-in is missing from the packaged rootfs: $dropin" >&2
     exit 1
   }
@@ -149,14 +182,14 @@ done
 # 光有 .ko 不够：modprobe 靠 modules.dep 找它、也靠 modules.dep 先加载
 # v4l2-mem2mem / videobuf2-dma-contig（ophub 内核里是 =m）。索引没重生成的话，
 # 开机 systemd-modules-load 会静默失败，实机表现是「没有 /dev/videoN」。
-hcodec_dep=$(sudo debugfs -R "cat /lib/modules/$kernel_release/modules.dep" \
+hcodec_dep=$(debugfs -R "cat /lib/modules/$kernel_release/modules.dep" \
   "$tmp/rootfs.ext4" 2>/dev/null | grep '^extra/meson_hcodec\.ko:' || true)
 [[ "$hcodec_dep" == *v4l2-mem2mem.ko* && "$hcodec_dep" == *videobuf2-dma-contig.ko* ]] || {
   echo "modules.dep in the packaged rootfs does not resolve meson_hcodec: ${hcodec_dep:-<缺行>}" >&2
   exit 1
 }
 echo "  rootfs: modules.dep 已带上 meson_hcodec 及其两个依赖"
-sudo debugfs -R 'ls -l /etc/systemd/system/sysinit.target.wants' "$tmp/rootfs.ext4" 2>/dev/null \
+debugfs -R 'ls -l /etc/systemd/system/sysinit.target.wants' "$tmp/rootfs.ext4" 2>/dev/null \
   | sed 's/^/  rootfs: sysinit.target.wants: /'
 
 node "$root/scripts/burn-image.mjs" sparse \

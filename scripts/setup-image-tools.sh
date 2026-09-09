@@ -33,17 +33,25 @@ pinned() {
 # commit 必须精确匹配：这两个工具的输出字节直接进 burn.img，换版本等于换交付件。
 fetch() {
   local target=$1 repository=$2 commit=$3
-  if [[ -d "$target/.git" ]]; then
-    git -C "$target" fetch --quiet origin "$commit" 2>/dev/null || true
-  else
-    rm -rf "$target"
-    git clone --quiet --filter=blob:none "$repository" "$target"
-  fi
-  git -C "$target" checkout --quiet --detach "$commit"
-  [[ "$(git -C "$target" rev-parse HEAD)" == "$commit" ]] || {
-    echo "$target is not at the pinned commit" >&2
-    exit 1
-  }
+  for attempt in 1 2 3 4 5; do
+    if [[ -d "$target/.git" ]]; then
+      git -C "$target" fetch --quiet origin "$commit" 2>/dev/null || true
+    else
+      rm -rf "$target"
+      git clone --quiet --filter=blob:none "$repository" "$target" || true
+    fi
+    if [[ -d "$target/.git" ]] \
+      && git -C "$target" checkout --quiet --detach "$commit" \
+      && [[ "$(git -C "$target" rev-parse HEAD)" == "$commit" ]]; then
+      return
+    fi
+    if (( attempt < 5 )); then
+      echo "retrying $target fetch ($attempt/5)" >&2
+      sleep "$((attempt * 2))"
+    fi
+  done
+  echo "$target is not at the pinned commit after 5 attempts" >&2
+  exit 1
 }
 
 mapfile -t ampack < <(pinned "$root/config/burn-tooling.json" ampack)

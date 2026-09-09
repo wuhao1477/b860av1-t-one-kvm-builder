@@ -135,6 +135,20 @@ test('构建脚本必须核对冻结内核包的摘要，并按包里的名字�
   assert.match(builder, /ARCH=arm64 CROSS_COMPILE="\$cross" M="\$work\/build" modules/);
 });
 
+test('OUTPUT 的 field 必须归一化，不然出队的缓冲区还是 FIELD_ANY', () => {
+  // 实机 v4l2-compliance 1.30.1 的 4 个 MMAP 流测试全栽在
+  // v4l2-test-buffers.cpp:240 的 `g_field() == V4L2_FIELD_ANY`：应用按规范可以
+  // 递 ANY 进来，出队时**不许**还是 ANY。copy_metadata 把 field 从 src 抄到 dst，
+  // 所以只修 OUTPUT 这一头。
+  assert.match(src, /\.buf_out_validate = hc_buf_out_validate,/);
+  assert.match(src, /if \(vbuf->field == V4L2_FIELD_ANY\)\s*\n\s*vbuf->field = V4L2_FIELD_NONE;/);
+  // QEMU 那条线以前只跑非流测试，所以这个坑在没板子的时候看不见。
+  const qemu = fs.readFileSync(new URL('../scripts/hcodec-v4l2-qemu.sh', import.meta.url), 'utf8');
+  assert.match(qemu, /v4l2-compliance -d \/dev\/video0 -s2/);
+  // 流测试不接受 bytesused=0 的 CAPTURE 缓冲区，nohw 得给个假长度。
+  assert.match(src, /want == ENCODER_IDR_DONE \|\| want == ENCODER_NON_IDR_DONE\)\s*\n\s*WRITE_HREG\(HCODEC_VLC_TOTAL_BYTES, 64\);/);
+});
+
 test('ucode 卡死只能靠抬 QP 重编，而且要记住下限', () => {
   // 实机结论：某些宏块会让 FULL ucode 原地卡死在 ENCODER_MB_HEADER（om_xy/vlc_mb
   // 冻住、PC 还在打转），等 45 s、腾 VLC 环、替它应答 *_DONE、换 IE_ME_MB_TYPE、
@@ -148,4 +162,30 @@ test('ucode 卡死只能靠抬 QP 重编，而且要记住下限', () => {
   assert.match(src, /memset\(wq, 0, sizeof\(\*wq\)\);\s*\n\s*hc_qp_floor = 0;/);
   // 编通一帧只要 7 ms，8 s 的超时会让每次重试都停半天。
   assert.match(src, /static uint waitms = 300;/);
+});
+
+test('drain 收尾得驱动自己打 LAST，两条路都要', () => {
+  // 5.10 的 v4l2_m2m_buf_done_and_job_finish() **不碰** draining 状态（5.13 才把
+  // 这段挪进 helper）。ENC_CMD_STOP 之后核心只记下 last_src_buf 就返回，指望驱动
+  // 给对应的 CAPTURE 缓冲区打 V4L2_BUF_FLAG_LAST 并 mark_stopped。漏掉的话应用
+  // 永远等不到 LAST：实机 v4l2-compliance -s2 就在 select 上空转到被 timeout 打死
+  // （POLLOUT 一直就绪、POLLIN 永远不来）。
+  assert.match(src, /v4l2_m2m_is_last_draining_src_buf\(ctx->fh\.m2m_ctx, src\)/);
+  assert.match(src, /dst->flags \|= V4L2_BUF_FLAG_LAST;\s*\n\s*v4l2_m2m_mark_stopped\(ctx->fh\.m2m_ctx\);/);
+  // 第二条路：STOP 来的时候 CAPTURE 队列可能是空的，收尾那个缓冲区在 buf_queue
+  // 里直接打 LAST 交回去，别再送去编。
+  assert.match(src, /v4l2_m2m_dst_buf_is_last\(ctx->fh\.m2m_ctx\)/);
+  assert.match(src, /vb2_set_plane_payload\(vb, 0, 0\);\s*\n\s*v4l2_m2m_last_buffer_done\(ctx->fh\.m2m_ctx, vbuf\);/);
+});
+
+test('.poll 要自己先挂上两条 done_wq，5.10 的 m2m 用 epoll 是坏的', () => {
+  // 5.10 的 v4l2_m2m_poll() 把 poll_wait(&done_wq) 关在 req_events 判断里面。
+  // EPOLL_CTL_ADD 时应用可以先递空事件集（v4l2-compliance 就是这么探的，见
+  // v4l2-test-buffers.cpp:1183），那一趟 done_wq 一条都没挂上；随后的
+  // EPOLL_CTL_MOD 走 ep_item_poll() 的 qproc == NULL 路径，只重算就绪位、**不会**
+  // 补挂等待队列 → wake_up(&q->done_wq) 传不到 epoll，epoll_wait 干等 2 s 超时。
+  // 实机 MMAP (epoll, REQBUFS) 栽在 v4l2-test-buffers.cpp:1237 的 `ret == 0`。
+  assert.match(src, /\.poll = hc_poll,/);
+  assert.match(src, /poll_wait\(file, &v4l2_m2m_get_src_vq\(ctx->fh\.m2m_ctx\)->done_wq, wait\);\s*\n\s*poll_wait\(file, &v4l2_m2m_get_dst_vq\(ctx->fh\.m2m_ctx\)->done_wq, wait\);/);
+  assert.match(src, /return v4l2_m2m_fop_poll\(file, wait\);/);
 });

@@ -21,12 +21,11 @@ repo='wuhao1477/b860av1-t-armbian-burn-builder'
 tag='armbian-26.08.0-debian-13.6-trixie-k5.10.260-build-37.1'
 assets_dir="release-assets/$tag"
 mkdir -p "$assets_dir"
-gh release download "$tag" --repo "$repo" --dir "$assets_dir" \
-  --pattern resolved-sources.json \
-  --pattern validation-report.json \
-  --pattern filesystem-manifest.sha256 \
-  --pattern release-tag.txt \
-  --pattern qemu-system-smoke.json
+CNB_REPO_SLUG="$repo" node scripts/cnb-release.mjs download "$tag" resolved-sources.json "$assets_dir/resolved-sources.json"
+CNB_REPO_SLUG="$repo" node scripts/cnb-release.mjs download "$tag" validation-report.json "$assets_dir/validation-report.json"
+CNB_REPO_SLUG="$repo" node scripts/cnb-release.mjs download "$tag" filesystem-manifest.sha256 "$assets_dir/filesystem-manifest.sha256"
+CNB_REPO_SLUG="$repo" node scripts/cnb-release.mjs download "$tag" release-tag.txt "$assets_dir/release-tag.txt"
+CNB_REPO_SLUG="$repo" node scripts/cnb-release.mjs download "$tag" qemu-system-smoke.json "$assets_dir/qemu-system-smoke.json"
 node scripts/generate-release-metadata.mjs \
   --assets "$assets_dir" \
   --output release-metadata.json
@@ -71,10 +70,11 @@ the read-only `device-evidence-pr.yml` validator. After the pull request is
 reviewed, a maintainer revalidates and publishes uniquely named Release assets:
 
 ```bash
-gh workflow run verify-device.yml \
-  -f release_tag='<release-tag>' \
-  -f evidence_path='evidence/<release-tag>/<evidence-id>' \
-  -f confirmation=verify
+在 CNB 页面点击 **Verify device evidence**，填写：
+
+- `release_tag=<release-tag>`
+- `evidence_path=evidence/<release-tag>/<evidence-id>`
+- `confirmation=verify`
 ```
 
 The manual workflow has separate validation and publication jobs. Validation

@@ -17,8 +17,7 @@
 两个要点，省得白跑一次 CI：
 
 - 改 pin 必须同时改 `docs/frozen-inputs.md`，`tests/integration-contract.test.mjs` 有断言守着。
-- `weekly-burn-build.yml` 的 `detect` 带 `if: github.ref_name == default_branch`，
-  在 feature 分支上 dispatch 只会跑诊断 job，产不出包。
+- CNB 的 `weekly-burn-build.sh` 只从默认分支发布 weekly 产物；feature 分支只用于检查。
 
 ## 本地跑起来
 

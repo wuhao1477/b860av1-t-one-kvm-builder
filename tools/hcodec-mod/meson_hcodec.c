@@ -326,6 +326,12 @@ static int hc_wait(u32 want, unsigned int ms)
 		WRITE_HREG(ENCODER_STATUS, want);
 		if (want == ENCODER_PICTURE_DONE)
 			WRITE_HREG(HCODEC_VLC_TOTAL_BYTES, 21);
+		/* 帧也要给个非零长度：v4l2-compliance 的流测试不接受 bytesused=0
+		 * 的 CAPTURE 缓冲区（除了 drain 末尾那个 LAST），给 0 就等于把
+		 * QEMU 上唯一能自动跑的那半边流测试关掉。内容是假的，长度是真的。
+		 */
+		if (want == ENCODER_IDR_DONE || want == ENCODER_NON_IDR_DONE)
+			WRITE_HREG(HCODEC_VLC_TOTAL_BYTES, 64);
 		return 0;
 	}
 
@@ -796,6 +802,7 @@ struct hc_ctx {
 	u32 fps_num, fps_den;
 	u32 gop, bitrate, qp_i, qp_p, qp_min, qp_max;
 	u32 cur_qp, since_idr;
+	u32 sequence;		/* 帧序号，每次 STREAMON 归零；见 hc_work */
 	/* ucode 不做色彩变换、SPS 里也没有 VUI，所以 colorimetry 只是元数据：
 	 * 原样收下、原样带到 CAPTURE（v4l2-compliance 强制要求这个 round-trip）。
 	 */
@@ -833,32 +840,36 @@ static u32 hc_stride(u32 fourcc, u32 w)
 	return fourcc == V4L2_PIX_FMT_YUV420 ? ALIGN(w, 64) : ALIGN(w, 32);
 }
 
-static void hc_fmt_out(struct hc_ctx *ctx, struct v4l2_pix_format *pix)
+static void hc_fmt_out(struct hc_ctx *ctx, struct v4l2_pix_format_mplane *pix)
 {
+	memset(pix, 0, sizeof(*pix));
 	pix->pixelformat = ctx->fourcc;
 	pix->width = ctx->width;
 	pix->height = ctx->height;
 	pix->field = V4L2_FIELD_NONE;
-	pix->bytesperline = ctx->bytesperline;
-	pix->sizeimage = ctx->sizeimage;
+	pix->plane_fmt[0].bytesperline = ctx->bytesperline;
+	pix->plane_fmt[0].sizeimage = ctx->sizeimage;
 	pix->colorspace = ctx->colorspace;
 	pix->ycbcr_enc = ctx->ycbcr_enc;
 	pix->quantization = ctx->quantization;
 	pix->xfer_func = ctx->xfer_func;
+	pix->num_planes = 1;
 }
 
-static void hc_fmt_cap(struct hc_ctx *ctx, struct v4l2_pix_format *pix)
+static void hc_fmt_cap(struct hc_ctx *ctx, struct v4l2_pix_format_mplane *pix)
 {
+	memset(pix, 0, sizeof(*pix));
 	pix->pixelformat = V4L2_PIX_FMT_H264;
 	pix->width = ctx->width;
 	pix->height = ctx->height;
 	pix->field = V4L2_FIELD_NONE;
-	pix->bytesperline = 0;
-	pix->sizeimage = ctx->bs_size;
+	pix->plane_fmt[0].bytesperline = 0;
+	pix->plane_fmt[0].sizeimage = ctx->bs_size;
 	pix->colorspace = ctx->colorspace;
 	pix->ycbcr_enc = ctx->ycbcr_enc;
 	pix->quantization = ctx->quantization;
 	pix->xfer_func = ctx->xfer_func;
+	pix->num_planes = 1;
 }
 
 /* v4l2-compliance 会拿 0xff 填满整个结构体来试 TRY_FMT，所以越界值一律退回默认。 */
@@ -921,6 +932,13 @@ static void hc_rate(struct hc_ctx *ctx, u32 got)
 		ctx->cur_qp++;
 	else if (got < target - target / 4 && ctx->cur_qp > ctx->qp_min)
 		ctx->cur_qp--;
+}
+
+static void hc_eos(struct hc_ctx *ctx)
+{
+	static const struct v4l2_event eos = { .type = V4L2_EVENT_EOS };
+
+	v4l2_event_queue_fh(&ctx->fh, &eos);
 }
 
 /* device_run 不能直接编：hc_wait 要睡，而且 job_finish 会当场回调下一轮 →
@@ -1014,11 +1032,29 @@ done:
 		v4l2_err(&hc_v4l2, "编码失败（%d），idr=%d\n", ret, idr);
 		vb2_set_plane_payload(&dst->vb2_buf, 0, 0);
 	}
+	/* 两条队列的 sequence 都得由驱动填，而且必须逐帧递增：
+	 * v4l2_m2m_buf_copy_metadata() 抄 timestamp / field / timecode，**不抄
+	 * sequence**。留 0 的话 v4l2-compliance 的 v4l2-test-buffers.cpp:412
+	 * （`g_sequence() < last_seq + 1`）在第一帧就判失败，实机 1.30.1 上
+	 * 4 个 MMAP 流测试全栽在这儿。一进一出严格 1:1，所以一个计数器够。
+	 */
+	src->sequence = dst->sequence = ctx->sequence++;
 	v4l2_m2m_buf_copy_metadata(src, dst, false);
 	dst->flags &= ~(V4L2_BUF_FLAG_KEYFRAME | V4L2_BUF_FLAG_PFRAME);
 	dst->flags |= idr ? V4L2_BUF_FLAG_KEYFRAME : V4L2_BUF_FLAG_PFRAME;
 
-	/* 这个 helper 顺手做 draining 的 V4L2_BUF_FLAG_LAST，别自己 remove+done */
+	/* drain 收尾得驱动自己做：5.10 的 v4l2_m2m_buf_done_and_job_finish() **不碰**
+	 * draining 状态（5.13 才把这段挪进 helper 里）。ENC_CMD_STOP 之后，
+	 * v4l2_update_last_buf_state() 只记下 last_src_buf 就返回，指望驱动在编完
+	 * 那一帧时给对应的 CAPTURE 缓冲区打上 V4L2_BUF_FLAG_LAST 并 mark_stopped。
+	 * 漏掉的话应用永远等不到 LAST：实机 v4l2-compliance -s2 就卡在 select 上
+	 * 空转到被 timeout 打死（POLLOUT 一直就绪、POLLIN 永远不来）。
+	 */
+	if (v4l2_m2m_is_last_draining_src_buf(ctx->fh.m2m_ctx, src)) {
+		dst->flags |= V4L2_BUF_FLAG_LAST;
+		v4l2_m2m_mark_stopped(ctx->fh.m2m_ctx);
+		hc_eos(ctx);
+	}
 	v4l2_m2m_buf_done_and_job_finish(hc_m2m, ctx->fh.m2m_ctx,
 					 ret ? VB2_BUF_STATE_ERROR :
 					       VB2_BUF_STATE_DONE);
@@ -1061,11 +1097,40 @@ static int hc_buf_prepare(struct vb2_buffer *vb)
 	return 0;
 }
 
+/* OUTPUT 队列的 field 必须由驱动归一化。应用（含 v4l2-compliance）按规范可以
+ * 递 V4L2_FIELD_ANY 进来，而出队的缓冲区**不许**还是 ANY ——
+ * v4l2-test-buffers.cpp:240 的 `g_field() == V4L2_FIELD_ANY` 就是这一条，
+ * 实机 v4l2-compliance 1.30.1 的 4 个 MMAP 流测试全是栽在这儿。
+ * `v4l2_m2m_buf_copy_metadata()` 把 field 从 src 抄到 dst，所以只修这一头就够。
+ */
+static int hc_buf_out_validate(struct vb2_buffer *vb)
+{
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+
+	if (vbuf->field == V4L2_FIELD_ANY)
+		vbuf->field = V4L2_FIELD_NONE;
+	if (vbuf->field != V4L2_FIELD_NONE)
+		return -EINVAL;
+	return 0;
+}
+
 static void hc_buf_queue(struct vb2_buffer *vb)
 {
 	struct hc_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 
-	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, to_vb2_v4l2_buffer(vb));
+	/* drain 的第二条路：ENC_CMD_STOP 来的时候 CAPTURE 队列可能是空的，核心只置
+	 * next_buf_last 就走了（v4l2_update_last_buf_state 的注释点名要驱动在这里
+	 * 兑现）。这一个就是收尾的那个，直接打 LAST 交回去，别再送去编。
+	 */
+	if (V4L2_TYPE_IS_CAPTURE(vb->vb2_queue->type) &&
+	    v4l2_m2m_dst_buf_is_last(ctx->fh.m2m_ctx)) {
+		vb2_set_plane_payload(vb, 0, 0);
+		v4l2_m2m_last_buffer_done(ctx->fh.m2m_ctx, vbuf);
+		hc_eos(ctx);
+		return;
+	}
+	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
 }
 
 static void hc_return_bufs(struct hc_ctx *ctx, struct vb2_queue *q,
@@ -1103,13 +1168,17 @@ static int hc_start_streaming(struct vb2_queue *q, unsigned int count)
 	hc_streamer = ctx;
 	ctx->since_idr = 0;
 	ctx->force_idr = true;
+	/* 两条队列都会进这里，只在 OUTPUT 上归零：CAPTURE 的 STREAMON 通常在
+	 * OUTPUT 之后，跟着清一次就会把已经推进的计数打回 0。
+	 */
+	if (V4L2_TYPE_IS_OUTPUT(q->type))
+		ctx->sequence = 0;
 	v4l2_m2m_update_start_streaming_state(ctx->fh.m2m_ctx, q);
 	return 0;
 }
 
 static void hc_stop_streaming(struct vb2_queue *q)
 {
-	static const struct v4l2_event eos = { .type = V4L2_EVENT_EOS };
 	struct hc_ctx *ctx = vb2_get_drv_priv(q);
 
 	flush_workqueue(hc_workq);
@@ -1122,12 +1191,13 @@ static void hc_stop_streaming(struct vb2_queue *q)
 	}
 	if (V4L2_TYPE_IS_OUTPUT(q->type) &&
 	    v4l2_m2m_has_stopped(ctx->fh.m2m_ctx))
-		v4l2_event_queue_fh(&ctx->fh, &eos);
+		hc_eos(ctx);
 }
 
 static const struct vb2_ops hc_vb2_ops = {
 	.queue_setup = hc_queue_setup,
 	.buf_prepare = hc_buf_prepare,
+	.buf_out_validate = hc_buf_out_validate,
 	.buf_queue = hc_buf_queue,
 	.start_streaming = hc_start_streaming,
 	.stop_streaming = hc_stop_streaming,
@@ -1144,8 +1214,8 @@ static int hc_queue_init(void *priv, struct vb2_queue *src,
 
 	for (i = 0; i < 2; i++) {
 		q = i ? dst : src;
-		q->type = i ? V4L2_BUF_TYPE_VIDEO_CAPTURE :
-			      V4L2_BUF_TYPE_VIDEO_OUTPUT;
+		q->type = i ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE :
+			      V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
 		q->io_modes = VB2_MMAP | VB2_DMABUF;
 		q->drv_priv = ctx;
 		q->ops = &hc_vb2_ops;
@@ -1230,19 +1300,19 @@ static int hc_enum_framesizes(struct file *f, void *p,
 
 static int hc_g_fmt_out(struct file *f, void *p, struct v4l2_format *fmt)
 {
-	hc_fmt_out(hc_fh(f), &fmt->fmt.pix);
+	hc_fmt_out(hc_fh(f), &fmt->fmt.pix_mp);
 	return 0;
 }
 
 static int hc_g_fmt_cap(struct file *f, void *p, struct v4l2_format *fmt)
 {
-	hc_fmt_cap(hc_fh(f), &fmt->fmt.pix);
+	hc_fmt_cap(hc_fh(f), &fmt->fmt.pix_mp);
 	return 0;
 }
 
 static int hc_try_fmt_out(struct file *f, void *p, struct v4l2_format *fmt)
 {
-	struct v4l2_pix_format *pix = &fmt->fmt.pix;
+	struct v4l2_pix_format_mplane *pix = &fmt->fmt.pix_mp;
 	struct hc_ctx *ctx = hc_fh(f);
 	struct hc_ctx probe = {};
 	int i;
@@ -1272,7 +1342,7 @@ static int hc_try_fmt_out(struct file *f, void *p, struct v4l2_format *fmt)
 
 static int hc_try_fmt_cap(struct file *f, void *p, struct v4l2_format *fmt)
 {
-	struct v4l2_pix_format *pix = &fmt->fmt.pix;
+	struct v4l2_pix_format_mplane *pix = &fmt->fmt.pix_mp;
 	struct hc_ctx *ctx = hc_fh(f);
 	/* CAPTURE 的 colorimetry 跟着 OUTPUT，不接受用户改 */
 	struct hc_ctx probe = {
@@ -1297,13 +1367,13 @@ static int hc_s_fmt_out(struct file *f, void *p, struct v4l2_format *fmt)
 		return ret;
 	if (vb2_is_busy(v4l2_m2m_get_src_vq(ctx->fh.m2m_ctx)))
 		return -EBUSY;
-	ctx->fourcc = fmt->fmt.pix.pixelformat;
-	ctx->colorspace = fmt->fmt.pix.colorspace;
-	ctx->ycbcr_enc = fmt->fmt.pix.ycbcr_enc;
-	ctx->quantization = fmt->fmt.pix.quantization;
-	ctx->xfer_func = fmt->fmt.pix.xfer_func;
-	hc_set_geom(ctx, fmt->fmt.pix.width, fmt->fmt.pix.height);
-	hc_fmt_out(ctx, &fmt->fmt.pix);
+	ctx->fourcc = fmt->fmt.pix_mp.pixelformat;
+	ctx->colorspace = fmt->fmt.pix_mp.colorspace;
+	ctx->ycbcr_enc = fmt->fmt.pix_mp.ycbcr_enc;
+	ctx->quantization = fmt->fmt.pix_mp.quantization;
+	ctx->xfer_func = fmt->fmt.pix_mp.xfer_func;
+	hc_set_geom(ctx, fmt->fmt.pix_mp.width, fmt->fmt.pix_mp.height);
+	hc_fmt_out(ctx, &fmt->fmt.pix_mp);
 	return 0;
 }
 
@@ -1319,8 +1389,8 @@ static int hc_s_fmt_cap(struct file *f, void *p, struct v4l2_format *fmt)
 		return ret;
 	if (vb2_is_busy(v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx)))
 		return -EBUSY;
-	hc_set_geom(ctx, fmt->fmt.pix.width, fmt->fmt.pix.height);
-	hc_fmt_cap(ctx, &fmt->fmt.pix);
+	hc_set_geom(ctx, fmt->fmt.pix_mp.width, fmt->fmt.pix_mp.height);
+	hc_fmt_cap(ctx, &fmt->fmt.pix_mp);
 	return 0;
 }
 
@@ -1366,12 +1436,12 @@ static const struct v4l2_ioctl_ops hc_ioctl_ops = {
 	.vidioc_enum_fmt_vid_out = hc_enum_fmt_out,
 	.vidioc_enum_fmt_vid_cap = hc_enum_fmt_cap,
 	.vidioc_enum_framesizes = hc_enum_framesizes,
-	.vidioc_g_fmt_vid_out = hc_g_fmt_out,
-	.vidioc_g_fmt_vid_cap = hc_g_fmt_cap,
-	.vidioc_try_fmt_vid_out = hc_try_fmt_out,
-	.vidioc_try_fmt_vid_cap = hc_try_fmt_cap,
-	.vidioc_s_fmt_vid_out = hc_s_fmt_out,
-	.vidioc_s_fmt_vid_cap = hc_s_fmt_cap,
+	.vidioc_g_fmt_vid_out_mplane = hc_g_fmt_out,
+	.vidioc_g_fmt_vid_cap_mplane = hc_g_fmt_cap,
+	.vidioc_try_fmt_vid_out_mplane = hc_try_fmt_out,
+	.vidioc_try_fmt_vid_cap_mplane = hc_try_fmt_cap,
+	.vidioc_s_fmt_vid_out_mplane = hc_s_fmt_out,
+	.vidioc_s_fmt_vid_cap_mplane = hc_s_fmt_cap,
 	.vidioc_g_parm = hc_g_parm,
 	.vidioc_s_parm = hc_s_parm,
 	.vidioc_reqbufs = v4l2_m2m_ioctl_reqbufs,
@@ -1415,6 +1485,15 @@ static int hc_s_ctrl(struct v4l2_ctrl *c)
 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
 		ctx->force_idr = true;
 		break;
+	case V4L2_CID_MPEG_VIDEO_H264_I_PERIOD:
+		/* µStreamer 用这个而不是 GOP_SIZE 配 GOP（m2m.c 的 _m2m_encoder_prepare，
+		 * 失败即 _E_XIOCTL 销毁编码器）。对只出 I/P 的我们来说，「IDR 间隔」和
+		 * 「GOP 长度」是同一个东西，所以共用 ctx->gop。
+		 */
+		ctx->gop = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_LEVEL:
+	case V4L2_CID_MPEG_VIDEO_REPEAT_SEQ_HEADER:
 	case V4L2_CID_MPEG_VIDEO_H264_PROFILE:
 	case V4L2_CID_MPEG_VIDEO_HEADER_MODE:
 	case V4L2_CID_MPEG_VIDEO_B_FRAMES:
@@ -1431,10 +1510,15 @@ static int hc_ctrls_init(struct hc_ctx *ctx)
 {
 	struct v4l2_ctrl_handler *h = &ctx->ctrls;
 
-	v4l2_ctrl_handler_init(h, 10);
+	v4l2_ctrl_handler_init(h, 16);
 	v4l2_ctrl_new_std(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_BITRATE,
 			  32000, 40000000, 1000, ctx->bitrate);
 	v4l2_ctrl_new_std(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_GOP_SIZE,
+			  0, 300, 1, ctx->gop);
+	/* µStreamer 配 GOP 用的是 I_PERIOD 而不是 GOP_SIZE，缺了它
+	 * _m2m_encoder_prepare() 的 _E_XIOCTL 会直接把编码器销毁。见 hc_s_ctrl。
+	 */
+	v4l2_ctrl_new_std(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_H264_I_PERIOD,
 			  0, 300, 1, ctx->gop);
 	v4l2_ctrl_new_std(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_H264_I_FRAME_QP,
 			  10, 51, 1, ctx->qp_i);
@@ -1448,11 +1532,33 @@ static int hc_ctrls_init(struct hc_ctx *ctx)
 			  0, 0, 1, 0);
 	v4l2_ctrl_new_std(h, &hc_ctrl_ops,
 			  V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0, 0, 0, 0);
-	/* ucode 只会 Baseline，头也只能贴在第一帧前面（每个 IDR 都重贴一份）。 */
+	/* 我们每个 IDR 都把 SPS/PPS 重贴一份，所以这个语义恒为真；µStreamer 会显式
+	 * 置 1（m2m.c 的 _m2m_encoder_prepare），缺了控件就 _E_XIOCTL 销毁编码器。
+	 * min=max=1 表示「只能是开」，用户想关也关不掉。
+	 */
+	v4l2_ctrl_new_std(h, &hc_ctrl_ops,
+			  V4L2_CID_MPEG_VIDEO_REPEAT_SEQ_HEADER, 1, 1, 1, 1);
+	/* ucode 只会 Baseline。CONSTRAINED_BASELINE 是 Baseline 去掉 FMO/ASO/RS 的
+	 * 子集，而这三样我们本来就不产出（只有 I/P、无 CABAC、无 B 帧），所以两个都
+	 * 报得出来，默认给 CONSTRAINED_BASELINE —— µStreamer 要的正是这一个。
+	 */
 	v4l2_ctrl_new_std_menu(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_H264_PROFILE,
-			       V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE,
-			       ~BIT(V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE),
-			       V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE);
+			       V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE,
+			       ~(BIT(V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE) |
+				 BIT(V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE)),
+			       V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE);
+	/* Level 只是码流里的一个约束声明，ucode 不看它。µStreamer 按分辨率挑 4.0 /
+	 * 4.2 / 5.1（m2m.c），所以这三个都得在菜单里，否则 S_CTRL 失败即销毁编码器。
+	 * 硬件上限 1920x1088 对应 Level 4.2 够用，5.1 只是让它别报错。
+	 */
+	v4l2_ctrl_new_std_menu(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_H264_LEVEL,
+			       V4L2_MPEG_VIDEO_H264_LEVEL_5_1,
+			       ~(BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_0) |
+				 BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_1) |
+				 BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_2) |
+				 BIT(V4L2_MPEG_VIDEO_H264_LEVEL_5_0) |
+				 BIT(V4L2_MPEG_VIDEO_H264_LEVEL_5_1)),
+			       V4L2_MPEG_VIDEO_H264_LEVEL_4_0);
 	v4l2_ctrl_new_std_menu(h, &hc_ctrl_ops, V4L2_CID_MPEG_VIDEO_HEADER_MODE,
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME,
 			       ~BIT(V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME),
@@ -1537,11 +1643,35 @@ static int hc_release(struct file *file)
 	return 0;
 }
 
+/* 5.10 的 v4l2_m2m_poll() 把两条 done_wq 的 poll_wait 关在
+ * `req_events & (EPOLLIN|EPOLLOUT|EPOLLRDNORM|EPOLLWRNORM)` 里面，于是 epoll
+ * 用起来是坏的：EPOLL_CTL_ADD 时应用可以先递一个空事件集（v4l2-compliance 就
+ * 是这么探这个 bug 的，见 v4l2-test-buffers.cpp:1183 的注释），这一趟 req_events
+ * 为 0 → done_wq 一条都没挂上；随后的 EPOLL_CTL_MOD 走 ep_item_poll() 的
+ * qproc == NULL 路径，只重算就绪位、**不会**补挂等待队列。结果缓冲区编完那下
+ * wake_up(&q->done_wq) 永远传不到 epoll，epoll_wait 干等 2000 ms 超时 ——
+ * 实机 v4l2-compliance 1.30.1 的 MMAP (epoll, REQBUFS) 就栽在这儿
+ * （v4l2-test-buffers.cpp:1237 的 `ret == 0`）。
+ *
+ * 上游 5.15 起把这个 gate 删了（poll_wait 无条件做）。v4l2-mem2mem.ko 是内核自
+ * 带的，改不动，所以在自己的 .poll 里先无条件挂上两条 done_wq，再转下去 ——
+ * poll_wait() 对同一个队列重复挂是安全的（poll_table 的 entry 各自独立），
+ * 多挂一次只是多一次无害的唤醒。
+ */
+static __poll_t hc_poll(struct file *file, struct poll_table_struct *wait)
+{
+	struct hc_ctx *ctx = hc_fh(file);
+
+	poll_wait(file, &v4l2_m2m_get_src_vq(ctx->fh.m2m_ctx)->done_wq, wait);
+	poll_wait(file, &v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx)->done_wq, wait);
+	return v4l2_m2m_fop_poll(file, wait);
+}
+
 static const struct v4l2_file_operations hc_fops = {
 	.owner = THIS_MODULE,
 	.open = hc_open,
 	.release = hc_release,
-	.poll = v4l2_m2m_fop_poll,
+	.poll = hc_poll,
 	.unlocked_ioctl = video_ioctl2,
 	.mmap = v4l2_m2m_fop_mmap,
 };
@@ -1557,7 +1687,7 @@ static struct video_device hc_vdev = {
 	.ioctl_ops = &hc_ioctl_ops,
 	.minor = -1,
 	.release = video_device_release_empty,
-	.device_caps = V4L2_CAP_VIDEO_M2M | V4L2_CAP_STREAMING,
+	.device_caps = V4L2_CAP_VIDEO_M2M_MPLANE | V4L2_CAP_STREAMING,
 	.lock = &hc_lock,
 };
 

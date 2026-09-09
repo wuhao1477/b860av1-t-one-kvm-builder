@@ -273,10 +273,16 @@ test('the packager verifies the preseed on the image it is about to sparse', () 
   // 「脚本打印了启用」和「字节真的在包里」是两件事，build-47.1 就是在这里出事的。
   // 所以 dd 之后必须用 debugfs 复查一遍 drop-in，缺了让构建红。
   const packager = fs.readFileSync(path.join(root, 'scripts/build-burn-payloads.sh'), 'utf8');
-  const dd = packager.indexOf('dd if="$root_part"');
+  const rdump = packager.indexOf('debugfs -R "rdump /');
+  const defaults = packager.indexOf('SUDO= "$root/scripts/apply-rootfs-defaults.sh"');
+  const sync = packager.indexOf('sync-rootfs-tree.mjs');
+  const fsck = packager.indexOf('e2fsck -pf "$tmp/rootfs.ext4"');
   const sparse = packager.indexOf('burn-image.mjs" sparse');
-  assert.ok(dd > 0 && sparse > dd);
-  const between = packager.slice(dd, sparse);
+  assert.ok(rdump > 0 && rdump < defaults && defaults < sync && sync < fsck && fsck < sparse);
+  const between = packager.slice(rdump, sparse);
+  assert.match(between, /SUDO=/);
+  assert.match(between, /root-before/);
+  assert.match(between, /root-tree/);
   assert.match(between, /debugfs -R "stat \$dropin"/);
   assert.match(between, /drop-in is missing from the packaged rootfs/);
   assert.match(packager, /zram_dropin=\/etc\/systemd\/system\/sysinit\.target\.d\/10-b860-armbian-zram-config\.conf/);

@@ -73,7 +73,8 @@ jobs:
             config/mainline-boot.json board-overlays/burn-partitions.dtso \
             scripts/build-burn-payloads.sh scripts/build-vendor-boot-burn.sh \
             scripts/validate-vendor-boot-burn.sh scripts/setup-image-tools.sh \
-            scripts/apply-rootfs-defaults.sh scripts/fetch-vdec-firmware.sh \
+            scripts/apply-rootfs-defaults.sh scripts/sync-rootfs-tree.mjs \
+            scripts/fetch-vdec-firmware.sh \
             scripts/build-hcodec-module.sh config/sources.json \
             tools/hcenc/fetch-vendor.sh tools/hcodec-mod/meson_hcodec.c \
             tools/hcodec-mod/kmshim.h tools/hcodec-mod/Makefile \

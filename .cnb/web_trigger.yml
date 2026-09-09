@@ -1,0 +1,51 @@
+branch:
+  - reg: ^main$
+    buttons:
+      - name: Weekly raw build
+        description: Build and publish the weekly Armbian raw image.
+        event: web_trigger_weekly_raw
+        permissions:
+          roles: [owner, master, developer]
+        inputs:
+          force:
+            name: Rebuild unchanged fingerprint
+            description: Rebuild even when the resolved fingerprint is unchanged.
+            type: switch
+            default: "false"
+            options:
+              - { name: No, value: "false" }
+              - { name: Yes, value: "true" }
+      - name: Weekly burn build
+        description: Build and publish the weekly B860 burn image.
+        event: web_trigger_weekly_burn
+        permissions:
+          roles: [owner, master, developer]
+        inputs:
+          force:
+            name: Rebuild unchanged fingerprint
+            description: Rebuild even when the frozen input fingerprint is unchanged.
+            type: switch
+            default: "false"
+            options:
+              - { name: No, value: "false" }
+              - { name: Yes, value: "true" }
+      - name: Verify device evidence
+        description: Validate and publish evidence for one physical device.
+        event: web_trigger_verify_device
+        permissions:
+          roles: [owner, master, developer]
+        inputs:
+          release_tag:
+            name: Existing Armbian prerelease tag
+            required: true
+            type: input
+          evidence_path:
+            name: Evidence path
+            description: Repository path containing device-validation.json and device-serial.log.
+            required: true
+            type: input
+          confirmation:
+            name: Confirmation
+            description: Type verify to enable publication.
+            required: true
+            type: input

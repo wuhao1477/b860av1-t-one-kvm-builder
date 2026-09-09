@@ -92,12 +92,9 @@ test('detector audits every public release before fingerprint comparison', () =>
 
   assert.match(detect, /scripts\/audit-public-releases\.sh/);
   assert.ok(detect.indexOf('scripts/audit-public-releases.sh') < detect.indexOf('latest_tag='));
-  assert.match(audit, /--exclude-drafts/);
-  assert.match(audit, /isDraft == false/);
-  assert.doesNotMatch(audit, /isPrerelease == true/);
-  assert.match(audit, /validatePublicRelease/);
-  assert.match(audit, /--pattern resolved-sources\.json --pattern validation-report\.json/);
-  assert.doesNotMatch(audit, /--pattern[^\n]*\.img\.gz/);
+  assert.match(audit, /CNB_REPO_SLUG/);
+  assert.match(audit, /cnb-release-audit\.mjs/);
+  assert.doesNotMatch(audit, /gh release/);
   assert.match(resolver, /scripts\/audit-public-releases\.sh/);
   assert.match(resolver, /src\/public-release-policy\.mjs/);
 });
@@ -372,6 +369,7 @@ test('burn workflow builds the vendor-boot package from the frozen raw release',
     'src/emmc-boot-chain.mjs',
     // rootfs 预置（首登向导、root 口令、zram、resize2fs）也决定包的内容。
     'scripts/apply-rootfs-defaults.sh',
+    'scripts/sync-rootfs-tree.mjs',
     // 树外编码模块是包里的字节，源码或构建脚本一改就得出新包。
     'scripts/build-hcodec-module.sh',
     'tools/hcodec-mod/meson_hcodec.c',

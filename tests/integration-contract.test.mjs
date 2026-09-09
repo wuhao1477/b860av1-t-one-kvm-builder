@@ -59,6 +59,18 @@ test('resolver fingerprints the complete image identity and device evidence reci
   ]) assert.match(resolver, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
+test('resolver fingerprints the CNB execution and release surface', () => {
+  const resolver = read('scripts/resolve-sources.mjs');
+  for (const file of [
+    '.cnb.yml',
+    '.cnb/web_trigger.yml',
+    'scripts/cnb-release.mjs',
+    'scripts/cnb-release-audit.mjs',
+    'scripts/cnb-weekly-raw-build.sh',
+    'src/cnb-release.mjs',
+  ]) assert.match(resolver, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
 test('README documents raw-image and operator-attested device validation boundaries', () => {
   const readme = read('README.md');
   assert.match(readme, /\.img\.gz/);
@@ -172,11 +184,11 @@ test('burn builder creates a mainline BL33 extlinux eMMC package', () => {
   const builder = read('scripts/build-burn-image.sh');
   const payloads = read('scripts/build-burn-payloads.sh');
   const validator = read('scripts/validate-burn-image.sh');
-  assert.match(payloads, /blkid --match-tag UUID --output value \"\$root_part\"/);
+  assert.match(payloads, /blkid --match-tag UUID --output value \"\$tmp\/rootfs\.ext4\"/);
   // rootfs 预置必须在 rootfs 还挂着、还没做成 sparse 之前跑，否则改动进不了包。
   const defaults = payloads.indexOf('apply-rootfs-defaults.sh');
   assert.notEqual(defaults, -1, 'payload builder does not apply the rootfs defaults');
-  assert.ok(defaults < payloads.indexOf('umount "$root_mount"'));
+  assert.ok(defaults < payloads.indexOf('sync-rootfs-tree.mjs'));
   assert.match(validator, /sparse-ext4-uuid/);
   for (const payload of [
     'boot.PARTITION', 'data.PARTITION', 'bootloader.PARTITION', 'meson1.dtb',

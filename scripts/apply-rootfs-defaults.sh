@@ -133,7 +133,7 @@ $sudo chmod 0755 "$root_mount/usr/local/sbin/b860-expand-rootfs"
 $sudo tee "$root_mount/etc/systemd/system/b860-expand-rootfs.service" >/dev/null <<'UNIT'
 [Unit]
 Description=Grow the B860 rootfs to fill the Amlogic data partition
-Documentation=https://github.com/wuhao1477/b860av1-t-armbian-burn-builder
+Documentation=https://cnb.cool/wuhao1477/b860av1-t-armbian-burn-builder
 After=local-fs.target
 ConditionPathIsReadWrite=/
 
@@ -177,14 +177,14 @@ for entry in "${enable_units[@]}"; do
   dropin="10-b860-${dropin#b860-}.conf"
   $sudo mkdir -p "$root_mount/etc/systemd/system/$target.d"
   $sudo tee "$root_mount/etc/systemd/system/$target.d/$dropin" >/dev/null <<CONF
-# 由 scripts/apply-rootfs-defaults.sh 写入。等价于 $target.wants/$unit，
+# 由 scripts/apply-rootfs-defaults.sh 写入。等价于 ${target}.wants/${unit}，
 # 但是常规文件 —— 符号链接进不了镜像，见 docs/known-issues.md 第 8 条。
 [Unit]
-Wants=$unit
+Wants=${unit}
 CONF
   $sudo mkdir -p "$root_mount/etc/systemd/system/$target.wants"
   $sudo ln -sfn "$source_unit" "$root_mount/etc/systemd/system/$target.wants/$unit"
-  say "启用 $unit（$target.d/$dropin + $target.wants 链接）"
+  say "启用 ${unit}（${target}.d/${dropin} + ${target}.wants 链接）"
 done
 
 for entry in "${disable_units[@]}"; do

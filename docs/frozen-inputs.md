@@ -55,9 +55,8 @@ raw 线现在和直刷包在同一个仓库，所以新的 raw release 直接就
 1. 挑一份新的 raw release，把 tag / 资产名 / 摘要读出来：
 
    ```bash
-   gh api repos/wuhao1477/b860av1-t-armbian-burn-builder/releases \
-     --jq '.[] | select(.draft == false and (.tag_name | startswith("armbian-"))) | {tag: .tag_name,
-           asset: (.assets[] | select(.name | test("^Armbian_.*\\.img\\.gz$")) | {name, size, digest})}'
+   CNB_REPO_SLUG=wuhao1477/b860av1-t-armbian-burn-builder \
+     node scripts/cnb-release.mjs list
    ```
 
 2. 改 `weekly-burn-build.yml` 顶部的 `SOURCE_RELEASE` / `SOURCE_ASSET` / `SOURCE_DIGEST`
@@ -72,9 +71,8 @@ raw 线现在和直刷包在同一个仓库，所以新的 raw release 直接就
 
 4. 把这一页的「冻结集合」表和产出摘要一起改掉，否则
    `tests/integration-contract.test.mjs` 会红（这是刻意的：pin 和文档必须同时动）。
-5. `pnpm check`，然后在**默认分支**上 dispatch
-   [Weekly burn image](../../actions/workflows/weekly-burn-build.yml)。
-   feature 分支上 `detect` 有 `if: github.ref_name == default_branch`，只会跑诊断、产不出包。
+5. `pnpm check`，然后在 CNB 仓库页面点击默认分支上的 **Weekly burn build** 按钮。
+   feature 分支不会发布 weekly 产物。
 6. 拿到新包**先上机**再改 README 的状态表。构建成功不等于能启动 ——
    变体 A/B 三次全黑就是这么出来的。
 
@@ -108,4 +106,3 @@ raw 线现在和直刷包在同一个仓库，所以新的 raw release 直接就
 `apt update && apt full-upgrade` 就能跟上，`/boot` 是空的、rootfs 里没有
 `linux-image-*`（[`docs/known-issues.md`](known-issues.md) 第 2 条），所以 `apt` 碰不到
 启动路径 —— 升级不会刷坏，但也换不了内核。
-

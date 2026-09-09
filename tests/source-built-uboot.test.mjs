@@ -59,6 +59,16 @@ test('U-Boot builder compiles a fixed commit and emits provenance evidence', () 
   assert.doesNotMatch(script, /u-boot-r3300l/);
 });
 
+test('U-Boot builder retries transient source fetch failures', () => {
+  const script = read('scripts/build-uboot-overload.sh');
+
+  assert.match(script, /for attempt in 1 2 3 4 5/);
+  assert.match(script, /git clone --filter=blob:none --no-checkout --quiet/);
+  assert.match(script, /git -C "\$source_dir" fetch --quiet --depth=1 origin "\$source_commit"/);
+  assert.match(script, /git -C "\$source_dir" checkout --detach --quiet "\$source_commit"/);
+  assert.match(script, /sleep "\$\(\(attempt \* 2\)\)"/);
+});
+
 test('raw builder injects only the source-built overload', () => {
   const script = read('scripts/build-raw-image.sh');
 
