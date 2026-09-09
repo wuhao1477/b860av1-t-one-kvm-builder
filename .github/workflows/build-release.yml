@@ -1,0 +1,130 @@
+name: Build and Release B860 One-KVM
+
+on:
+  workflow_dispatch:
+    inputs:
+      b860_tag:
+        description: 'B860 Armbian version'
+        required: true
+        default: 'v1.3.0'
+      one_kvm_tag:
+        description: 'One-KVM version'
+        required: true
+        default: 'latest'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git curl jq xz-utils nodejs npm \
+            gcc-aarch64-linux-gnu \
+            mtools dosfstools e2fsprogs kmod device-tree-compiler \
+            python3 bc bison flex make libssl-dev
+
+      - name: Set variables
+        id: vars
+        run: |
+          B860_TAG="${{ github.event.inputs.b860_tag }}"
+          ONE_KVM_TAG="${{ github.event.inputs.one_kvm_tag }}"
+
+          if [[ "$ONE_KVM_TAG" == "latest" ]]; then
+            ONE_KVM_TAG=$(curl -s https://api.github.com/repos/mofeng-git/One-KVM/releases/latest | jq -r '.tag_name')
+          fi
+
+          ONE_KVM_VERSION=$(echo "$ONE_KVM_TAG" | sed 's/^v//')
+          BUILD_TAG="base-${B860_TAG}-onekvm-${ONE_KVM_TAG}"
+
+          echo "b860_tag=$B860_TAG" >> $GITHUB_OUTPUT
+          echo "one_kvm_tag=$ONE_KVM_TAG" >> $GITHUB_OUTPUT
+          echo "one_kvm_version=$ONE_KVM_VERSION" >> $GITHUB_OUTPUT
+          echo "build_tag=$BUILD_TAG" >> $GITHUB_OUTPUT
+
+      - name: Run build script
+        env:
+          B860_TAG: ${{ steps.vars.outputs.b860_tag }}
+          ONE_KVM_TAG: ${{ steps.vars.outputs.one_kvm_tag }}
+          WORK_DIR: ${{ github.workspace }}/work-local
+          OUTPUT_DIR: ${{ github.workspace }}/output
+        run: |
+          chmod +x scripts/build-one-kvm-local.sh
+          ./scripts/build-one-kvm-local.sh
+
+      - name: List output
+        run: |
+          ls -lh output/
+          du -sh output/*
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.vars.outputs.build_tag }}
+          name: B860 One-KVM ${{ steps.vars.outputs.build_tag }}
+          body: |
+            # B860 One-KVM 开箱即用固件
+
+            **Base**: B860 Armbian [${{ steps.vars.outputs.b860_tag }}](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/${{ steps.vars.outputs.b860_tag }})
+            **One-KVM**: [${{ steps.vars.outputs.one_kvm_tag }}](https://github.com/mofeng-git/One-KVM/releases/tag/${{ steps.vars.outputs.one_kvm_tag }})
+
+            ## 特性
+
+            - ✅ One-KVM 预装并启用
+            - ✅ V4L2 硬件编码器（`/dev/video0`）已配置
+            - ✅ 刷机即用，访问 `http://<设备IP>:8080`
+
+            ## 刷机步骤
+
+            1. 下载 `B860-One-KVM-*.burn.img.xz`
+            2. 解压：`xz -d B860-One-KVM-*.burn.img.xz`
+            3. 使用 **晶晨 USB 烧录工具** 刷写
+            4. 勾选 **"擦除 flash" + "擦除 bootloader"**
+            5. 刷机完成后访问 One-KVM
+
+            ## 默认凭据
+
+            - SSH: `root` / `password`
+            - One-KVM: `admin` / `admin`
+
+            ## 硬件支持
+
+            - Amlogic S905L3-B (四核 Cortex-A55, 1.8 GHz)
+            - H.264 硬件编码器 (V4L2 M2M, 最高 1920x1088)
+            - 100 Mbps 有线网络, RTL8189FTV Wi-Fi
+            - 8 GB eMMC, 1 GB RAM
+
+            ## 验证
+
+            SSH 登录后验证硬件编码器：
+            ```bash
+            v4l2-ctl -d /dev/video0 -D
+            # 应显示: Driver name: meson_hcodec
+            ```
+
+            ## 文档
+
+            - [快速开始](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/blob/main/QUICKSTART.md)
+            - [构建指南](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/blob/main/BUILDING.md)
+
+            ---
+
+            ⚠️ **免责声明**: 刷写自定义固件可能使保修失效。风险自负。
+          files: |
+            output/*.img.xz
+            output/SHA256SUMS
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
