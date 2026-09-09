@@ -98,14 +98,15 @@ jobs:
       - name: Download Armbian base image
         run: |
           mkdir -p downloads
-          # Download from ophub's Armbian release
-          gh release download Armbian_noble_save_2024.11 \
+          # Download from ophub's latest Armbian release
+          gh release download Armbian_noble_arm64_server_2026.09 \
             --repo ophub/amlogic-s9xxx-armbian \
-            --pattern "*s905l3a*server*.img.gz" \
+            --pattern "*s905l3a*.img.gz" \
             --dir downloads/
 
-          # Rename to expected filename
-          mv downloads/Armbian_*_s905l3a_*.img.gz downloads/armbian-base.img.gz
+          # Use first matching file
+          ARMBIAN_FILE=$(ls downloads/Armbian_*_s905l3a*.img.gz | head -1)
+          mv "$ARMBIAN_FILE" downloads/armbian-base.img.gz
           gunzip downloads/armbian-base.img.gz
           ls -lh downloads/armbian-base.img
         env:
