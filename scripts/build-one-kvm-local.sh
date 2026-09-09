@@ -102,25 +102,43 @@ fi
 INJECT_CODE
 fi
 
-# 4. 下载 B860 Armbian release 的源文件
-echo "==> 下载 B860 Armbian $B860_TAG 源文件"
+# 4. 下载 ophub Armbian raw 镜像（B860 的基础）
+echo "==> 下载 ophub Armbian raw 镜像"
 SOURCE_DIR="$WORK_DIR/source-assets"
 mkdir -p "$SOURCE_DIR"
 
-gh release download "$B860_TAG" \
-  --repo wuhao1477/b860av1-t-armbian-burn-builder \
-  --pattern "Armbian_*.img.gz" \
-  --pattern "boot-components.json" \
-  --dir "$SOURCE_DIR/" || {
-  echo "错误：下载 B860 Armbian release 失败" >&2
-  echo "请手动下载以下文件到 $SOURCE_DIR/:" >&2
-  echo "  - Armbian_*.img.gz" >&2
-  echo "  - boot-components.json" >&2
-  exit 1
-}
+# ophub Armbian 镜像信息（从 B860 config/sources.json）
+OPHUB_REPO="ophub/amlogic-s9xxx-armbian"
+OPHUB_TAG="Armbian_26.11.0_2026.08.31"
+OPHUB_IMAGE="Armbian_26.11.0_amlogic_s905x3_trixie_5.10.268_server_2026.08.31.img.gz"
 
-RAW_IMAGE=$(ls "$SOURCE_DIR"/Armbian_*.img.gz | head -1)
-echo "    Raw image: $(basename "$RAW_IMAGE")"
+if [[ ! -f "$SOURCE_DIR/$OPHUB_IMAGE" ]]; then
+  echo "    从 $OPHUB_REPO 下载 $OPHUB_TAG"
+  gh release download "$OPHUB_TAG" \
+    --repo "$OPHUB_REPO" \
+    --pattern "$OPHUB_IMAGE" \
+    --dir "$SOURCE_DIR/" || {
+    echo "错误：下载 ophub Armbian 失败" >&2
+    echo "请手动下载: https://github.com/$OPHUB_REPO/releases/tag/$OPHUB_TAG" >&2
+    exit 1
+  }
+else
+  echo "    ophub Armbian 已存在，跳过下载"
+fi
+
+RAW_IMAGE="$SOURCE_DIR/$OPHUB_IMAGE"
+
+# 生成 boot-components.json（B860 构建需要）
+echo "==> 生成 boot-components.json"
+cat > "$SOURCE_DIR/boot-components.json" << 'EOF'
+{
+  "schemaVersion": 1,
+  "source": "ophub/amlogic-s9xxx-armbian",
+  "tag": "Armbian_26.11.0_2026.08.31",
+  "kernel": "5.10.268",
+  "distribution": "trixie"
+}
+EOF
 
 # 5. 运行构建
 echo "==> 构建 burn payloads（注入 One-KVM）"

@@ -1,6 +1,6 @@
 # B860 One-KVM Builder
 
-B860AV1.1-T One-KVM 一键安装工具。
+B860AV1.1-T One-KVM 一键安装工具（未来支持 burn.img 构建）。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -10,7 +10,7 @@ B860AV1.1-T One-KVM 一键安装工具。
 
 ## 简体中文
 
-### 快速开始（推荐）
+### 快速开始（当前推荐）
 
 **前提**：已刷入 [B860 Armbian v1.3.0](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/v1.3.0)
 
@@ -30,6 +30,31 @@ chmod +x install-one-kvm.sh
 ```
 
 安装完成后访问：`http://<B860-IP>:8080`（默认凭据：`admin` / `admin`）
+
+### 未来计划：完整 burn.img 构建
+
+从 B860 Armbian v1.4.0 开始，将支持完整的 burn.img 构建：
+
+```bash
+# 1. 下载 B860 Armbian 开发者产物
+gh release download v1.4.0 \
+  --repo wuhao1477/b860av1-t-armbian-burn-builder \
+  --pattern "Armbian_*.img.gz" \
+  --pattern "boot-components.json"
+
+# 2. 克隆 B860 builder 并运行构建
+git clone https://github.com/wuhao1477/b860av1-t-armbian-burn-builder.git
+cd b860av1-t-armbian-burn-builder
+
+# 3. 设置 ONE_KVM_DEB 并构建（apply-rootfs-defaults.sh 会注入）
+export ONE_KVM_DEB=/path/to/one-kvm.deb
+./scripts/build-burn-payloads.sh ../Armbian_*.img.gz ./payloads
+./scripts/build-vendor-boot-burn.sh ./payloads ./out
+
+# 输出：out/burn.img（开箱即用，包含 One-KVM）
+```
+
+**当前状态**：B860 Armbian v1.4.0 开发中，将提供开发者产物。
 
 ### 手动安装
 
@@ -70,7 +95,7 @@ v4l2-ctl -d /dev/video0 -D
 ### 文档
 
 - [快速开始指南](QUICKSTART.md)
-- [故障排查](BUILDING.md#故障排查)
+- [构建说明](BUILDING.md)（v1.4.0+ 可用）
 
 ### 支持
 
@@ -82,7 +107,7 @@ v4l2-ctl -d /dev/video0 -D
 
 ## English
 
-### Quick Start (Recommended)
+### Quick Start (Current Recommended)
 
 **Prerequisites**: Flash [B860 Armbian v1.3.0](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/v1.3.0) first
 
@@ -102,6 +127,31 @@ chmod +x install-one-kvm.sh
 ```
 
 Access One-KVM at: `http://<B860-IP>:8080` (default: `admin` / `admin`)
+
+### Future: Full burn.img Build
+
+Starting from B860 Armbian v1.4.0, full burn.img build will be supported:
+
+```bash
+# 1. Download B860 Armbian developer artifacts
+gh release download v1.4.0 \
+  --repo wuhao1477/b860av1-t-armbian-burn-builder \
+  --pattern "Armbian_*.img.gz" \
+  --pattern "boot-components.json"
+
+# 2. Clone B860 builder and run build
+git clone https://github.com/wuhao1477/b860av1-t-armbian-burn-builder.git
+cd b860av1-t-armbian-burn-builder
+
+# 3. Set ONE_KVM_DEB and build (apply-rootfs-defaults.sh will inject)
+export ONE_KVM_DEB=/path/to/one-kvm.deb
+./scripts/build-burn-payloads.sh ../Armbian_*.img.gz ./payloads
+./scripts/build-vendor-boot-burn.sh ./payloads ./out
+
+# Output: out/burn.img (ready-to-flash with One-KVM)
+```
+
+**Status**: B860 Armbian v1.4.0 in development, will provide developer artifacts.
 
 ### Manual Installation
 
@@ -142,7 +192,7 @@ Inherits all B860 Armbian hardware support:
 ### Documentation
 
 - [Quickstart Guide](QUICKSTART.md)
-- [Troubleshooting](BUILDING.md#troubleshooting)
+- [Build Guide](BUILDING.md) (available v1.4.0+)
 
 ### Support
 
@@ -151,6 +201,14 @@ Inherits all B860 Armbian hardware support:
 - **Upstream One-KVM**: [One-KVM](https://github.com/mofeng-git/One-KVM)
 
 ---
+
+## Project Scope
+
+**Current (v1.3.0 base)**:
+- ✅ One-click installation script for existing B860 Armbian installations
+- ⏳ Full burn.img builder (requires B860 Armbian v1.4.0+ developer artifacts)
+
+**Goal**: Provide ready-to-flash B860 One-KVM images with hardware encoder pre-configured.
 
 ## License
 
