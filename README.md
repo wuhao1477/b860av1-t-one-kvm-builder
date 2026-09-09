@@ -1,171 +1,111 @@
-# B860AV1.1-T Armbian
+# B860 One-KVM Builder
 
-Armbian-based Linux firmware for ZTE ZXV10 B860AV1.1-T set-top box with **hardware-accelerated H.264 encoding/decoding** support.
+开箱即用的 B860AV1.1-T One-KVM 固件构建工具。
 
-[![GitHub Release](https://img.shields.io/github/v/release/wuhao1477/b860av1-t-armbian-burn-builder)](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 English | [简体中文](README.zh-CN.md)
 
-## Features
+## 概述
 
-- 🔥 **Ready-to-flash image** for USB Burning Tool — no configuration needed
-- 🎥 **H.264 hardware encoder** (`/dev/video0`) — works with FFmpeg, GStreamer, µStreamer
-- 📺 **H.264 hardware decoder** — meson-vdec with firmware included
-- 🚀 **Fast boot** — 24s to login prompt
-- 🔒 **Reproducible builds** — pinned upstream inputs, full source tracking
-- 📦 **Debian 13 (Trixie)** — mainline kernel 5.10.268
+基于以下项目构建 B860AV1.1-T 的 One-KVM 固件：
+- [B860 Armbian](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder) — 带 H.264 硬件编码器的基础系统
+- [One-KVM](https://github.com/mofeng-git/One-KVM) — IP-KVM 软件
 
-## Quick Start
+**特性：**
+- ✅ One-KVM 预装并启用
+- ✅ V4L2 硬件编码器预配置（`/dev/video0`）
+- ✅ 刷机即用 — 访问 `http://<设备IP>:8080`
 
-### 1. Download
+## 本地构建
 
-Get the latest release: [**burn.img.xz**](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/latest)
-
-### 2. Flash
-
-1. Extract `burn.img` from the `.xz` archive
-2. Open **Amlogic USB Burning Tool**
-3. Load `burn.img` and **check both "Erase flash" and "Erase bootloader"**
-4. Connect the box in USB boot mode and flash
-5. Reboot — login via SSH with `root` / `password`
-
-📖 Detailed flashing guide: [`docs/burn-image.md`](docs/burn-image.md)
-
-### 3. Test hardware encoding
+在 Linux 环境下构建（需要原生 Linux 或 Docker）：
 
 ```bash
-# Check V4L2 encoder
-v4l2-ctl -d /dev/video0 -D
+# 前置依赖
+sudo apt-get install -y git curl jq xz-utils nodejs gcc-aarch64-linux-gnu \
+  mtools dosfstools e2fsprogs kmod device-tree-compiler
 
-# Encode with FFmpeg
-ffmpeg -f lavfi -i testsrc=size=1280x720:rate=30 -frames:v 10 \
-  -c:v h264_v4l2m2m -b:v 2M output.mp4
+# 安装 GitHub CLI
+# 参见: https://github.com/cli/cli#installation
 
-# Encode with GStreamer
-gst-launch-1.0 videotestsrc num-buffers=100 ! \
-  video/x-raw,width=1280,height=720 ! v4l2h264enc ! \
-  h264parse ! mp4mux ! filesink location=test.mp4
+# 克隆并构建
+git clone https://github.com/wuhao1477/b860av1-t-one-kvm-builder.git
+cd b860av1-t-one-kvm-builder
+
+# 运行构建（下载 B860 Armbian v1.3.0 + One-KVM 最新版，注入并重新打包）
+./scripts/build-one-kvm-local.sh
+
+# 输出: output/B860-One-KVM-*.burn.img.xz
 ```
 
-## Hardware Support
+构建耗时约 20-30 分钟（取决于下载速度和 CPU）。
 
-| Component | Status | Notes |
-|---|---|---|
-| **CPU** | ✅ Amlogic S905L3-B (quad-core Cortex-A55) | 1.8 GHz |
-| **H.264 encoder** | ✅ HCODEC (`meson_hcodec.ko`) | V4L2 M2M, up to 1920x1088, Baseline profile |
-| **H.264 decoder** | ✅ meson-vdec | Firmware included |
-| **Ethernet** | ✅ 100 Mbps | Auto-configured via DHCP |
-| **Wi-Fi** | ✅ RTL8189FTV (2.4 GHz) | Requires manual setup |
-| **HDMI** | ✅ 1080p output | Console + X11 |
-| **eMMC** | ✅ 8 GB | DDR52, 82 MB/s |
-| **Bluetooth** | ⚠️ Partial | Initialization timeout, see [known issues](docs/known-issues.md) |
-
-### Verified hardware batch
-- Board: `gxl_p211_1g` (P212 DTB, 1 GB RAM)
-- Stock U-Boot: matches `config/stock-environment.json`
-- Tested on hardware matching SHA256 hashes in `config/burn-inputs.json`
-
-⚠️ Public sources indicate hardware batch variations exist. This firmware is validated only for the specific batch identified by the stock bootloader and board inputs in this repository.
-
-## What's Included
-
-- **No first-boot wizard** — pre-configured root password (`password`), zsh, SSH
-- **Auto-expanding root partition** — uses full eMMC capacity on first boot
-- **400 MB zram swap** — enabled by default
-- **Fast boot** — `NetworkManager-wait-online` disabled
-- **V4L2-compliant encoder** — 54/54 `v4l2-compliance` tests pass
-- **µStreamer/One-KVM ready** — all required controls (I_PERIOD, LEVEL, PROFILE, REPEAT_SEQ_HEADER) + MPLANE queues
-
-## Documentation
-
-### User guides
-- [**Burn image guide**](docs/burn-image.md) — How to flash, boot sequence, troubleshooting
-- [**Known issues**](docs/known-issues.md) — Current limitations and workarounds
-
-### Hardware & drivers
-- [**Hardware encoder**](docs/hcodec-encoder-plan.md) — V4L2 driver design, capabilities, limitations
-- [**Hardware probes**](docs/hardware-probes.md) — HCODEC block verification via `/dev/mem`
-
-### Development
-- [**Build system**](docs/technical/build-details.md) — Two-line architecture, frozen inputs, presets
-- [**Version history**](docs/technical/version-history.md) — Release notes and changelog
-- [**Frozen inputs**](docs/frozen-inputs.md) — Why inputs are pinned, how to update
-- [**Device validation**](docs/device-validation.md) — Evidence collection process
-
-## Releases
-
-| Version | Status | Description |
-|---|---|---|
-| **v1.3.0** | ✅ Latest | µStreamer/One-KVM support + V4L2 full compliance (54/54) |
-| v1.2.0 | ✅ Verified | H.264 hardware encoder + decoder |
-| v1.1.0 | ✅ Verified | H.264 hardware decoder only |
-| v1.0.0 | ✅ Verified | Base system without hardware video |
-
-All `v1.x.x` releases are hardware-verified on physical devices.
-
-## Development
-
-### Build locally
-
-```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt-get install -y nodejs npm p7zip-full python3
-
-# Clone and setup
-git clone https://github.com/wuhao1477/b860av1-t-armbian-burn-builder.git
-cd b860av1-t-armbian-burn-builder
-npm install
-
-# Build burn image
-./scripts/build-vendor-boot-burn.sh
-```
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for detailed development workflow.
-
-### Architecture
+## 架构
 
 ```
-Input: Armbian raw image (frozen at build-46.1)
+输入：B860 Armbian v1.3.0 release
   ↓
-scripts/build-burn-payloads.sh → extract boot/rootfs, apply defaults
+克隆 B860 builder 仓库
   ↓
-scripts/apply-rootfs-defaults.sh → inject meson_hcodec.ko, vdec firmware, presets
+修改 apply-rootfs-defaults.sh（注入 One-KVM）
   ↓
-scripts/build-vendor-boot-burn.sh → pack Android boot + BL2 + sparse ext4
+下载 Armbian raw 镜像 + boot-components.json
   ↓
-Output: burn.img (flashable with USB Burning Tool)
+运行 build-burn-payloads.sh（ONE_KVM_DEB 环境变量）
+  ↓
+运行 build-vendor-boot-burn.sh
+  ↓
+输出：B860-One-KVM-*.burn.img.xz
 ```
 
-Key files:
-- `tools/hcodec-mod/meson_hcodec.c` — V4L2 M2M encoder driver (out-of-tree)
-- `board-inputs/` — Stock bootloader fragments (BL2, BL30, BL301, BL33)
-- `config/burn-inputs.json` — SHA256 whitelist for vendor binaries
+关键修改：`apply-rootfs-defaults.sh` 读取 `ONE_KVM_DEB` 环境变量并：
+1. 解压 One-KVM deb 到 rootfs
+2. 启用 systemd 服务
+3. 配置 `/etc/one-kvm/encoder.conf` 使用 V4L2 后端
 
-## License
+## 刷机
 
-MIT License — see [LICENSE](LICENSE) for details.
+1. 解压 `*.burn.img.xz`
+2. 打开 **晶晨 USB 烧录工具**
+3. 加载镜像，勾选 **"擦除 flash" + "擦除 bootloader"**
+4. B860 进入 USB 烧录模式，开始刷写
+5. 访问 One-KVM：`http://<设备IP>:8080`
 
-Incorporates materials from:
-- [ophub/amlogic-s9xxx-armbian](https://github.com/ophub/amlogic-s9xxx-armbian) (GPL-2.0)
-- [LibreELEC firmware binaries](https://github.com/LibreELEC/LibreELEC.tv) (various licenses)
-- Stock ZTE bootloader components (vendor binaries, redistribution for device owners)
+默认凭据：`admin` / `admin`
 
-See [THIRD_PARTY_SOURCES.md](THIRD_PARTY_SOURCES.md) for complete attribution.
+## 硬件支持
 
-## Contributing
+继承所有 B860 Armbian 硬件支持：
+- Amlogic S905L3-B（四核 Cortex-A55，1.8 GHz）
+- H.264 硬件编码器（V4L2 M2M，最高 1920x1088）
+- 100 Mbps 有线网络、RTL8189FTV Wi-Fi
+- 8 GB eMMC、1 GB RAM
 
-Contributions welcome! Please:
-1. Read [`CONTRIBUTING.md`](CONTRIBUTING.md)
-2. Test on real hardware
-3. Document changes in PR description
-4. Follow existing code style
+详见 [B860 Armbian 文档](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder#hardware-support)。
 
-## Support
+## 上游项目
 
-- **Issues**: [GitHub Issues](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/discussions)
+- [**B860 Armbian**](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder) — 带硬件编码器的基础系统
+- [**One-KVM**](https://github.com/mofeng-git/One-KVM) — IP-KVM 软件
+- [**WS1608 One-KVM Builder**](https://github.com/wuhao1477/ws1608-one-kvm-builder) — 类似的 WS1608 构建器
+
+## 许可证
+
+MIT License — 详见 [LICENSE](LICENSE)
+
+包含组件：
+- B860 Armbian (MIT)
+- One-KVM (GPL-3.0)
+
+完整归属见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+## 支持
+
+- **问题反馈**：[GitHub Issues](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/issues)
+- **上游 B860**：[B860 Armbian Issues](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/issues)
+- **上游 One-KVM**：[One-KVM Issues](https://github.com/mofeng-git/One-KVM/issues)
 
 ---
 
-⚠️ **Disclaimer**: Flashing custom firmware may void warranty. Use at your own risk.
+⚠️ **免责声明**：刷写自定义固件可能使保修失效。风险自负。
