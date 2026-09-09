@@ -118,7 +118,7 @@ jobs:
           echo "Detected kernel: $KERNEL_VERSION"
 
           # Build meson_hcodec module
-          ./scripts/build-hcodec-module.sh downloads/armbian-base.img output/
+          ./scripts/build-hcodec-module.sh output/
 
       - name: Build burn payloads with One-KVM
         env:
