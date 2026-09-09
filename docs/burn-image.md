@@ -5,9 +5,11 @@ Burning Tool 能直接刷的 `burn.img`，刷完开机就是 Debian/Armbian。
 
 ## 当前状态
 
-**变体 C 已在实机验证。** 交付的那一份是 `v1.0.0`（构建序号 `build-49.1`），`burn.img` sha256
-`2303d1c58b0061e9a70d6159e27e546c382d06cf792f3680d69f3659b8f02822`。刷完直接进系统，
-不走首次开机向导，六项预置全部实机确认（2026-09-03 首次，2026-09-04 换一次刷入复验）：
+**变体 C 已在实机验证。** 交付的那一份是 `v1.1.0`（构建序号 `build-50.1`），`burn.img` sha256
+`188d8ff6ea26694eb565759c3a0fc477c432529ce6055beac524b2c8c1b2bccf`。刷完直接进系统，
+不走首次开机向导，七项预置全部实机确认（2026-09-03 首次，2026-09-04 换一次刷入复验，
+2026-09-05 `v1.1.0` 再刷一次并验通 H.264 硬解）。下面这份读数取自 `v1.0.0` 那次
+（当时接着屏和 WiFi），`v1.1.0` 的 DTB / 内核 / bootloader 与它完全相同：
 
 ```
 Armbian OS 26.11.0 trixie / Debian GNU/Linux 13
@@ -21,6 +23,7 @@ wlan0    RTL8189FTV (8189fs)        已连 AP，可上网
 eth0     100Mbps/Full               DHCP 正常，收发无错误
 HDMI     card0-HDMI-A-1 connected
 eMMC     DDR52 82 MB/s              hdparm -t，HS200 打不通见 known-issues 第 1 条
+硬解     H.264 20 帧解通             v1.1.0 起才有微码，见 known-issues 第 10 条
 ```
 
 上游输入已冻结在这一份验证过的组合上，见 [`frozen-inputs.md`](frozen-inputs.md)；
@@ -224,7 +227,11 @@ scripts/validate-vendor-boot-burn.sh out/burn.img out/vendor-boot-contract.json
 上游换了东西就红，不会自己跟到新的 raw release（[`frozen-inputs.md`](frozen-inputs.md)）。
 `build-burn-payloads.sh` 里还会在 rootfs 上跑
 [`apply-rootfs-defaults.sh`](../scripts/apply-rootfs-defaults.sh) 做预置，并在 `dd` 之后用
-`debugfs` 复查 drop-in 真的在要写进 eMMC 的那份 ext4 里。
+`debugfs` 复查 drop-in 真的在要写进 eMMC 的那份 ext4 里。预置里有一样是自己编的：
+树外的 H.264 硬件编码模块 `meson_hcodec.ko`（[`scripts/build-hcodec-module.sh`](../scripts/build-hcodec-module.sh)
+在 runner 上交叉编，9 秒），装到 `/lib/modules/<release>/extra/` 并 `depmod -b`，
+`stage=1 selftest=0` 开机自动加载 —— mainline 5.10 只有解码，见
+[`hcodec-encoder-plan.md`](hcodec-encoder-plan.md) 阶段 1c。
 
 构建过程中强制断言的不变量：
 
