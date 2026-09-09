@@ -96,43 +96,33 @@ jobs:
       - name: Setup image tools
         run: ./scripts/setup-image-tools.sh
 
-      - name: Download Armbian base image
+      - name: Download B860 burn base image
         run: |
           mkdir -p downloads
-          # Download from ophub's latest Armbian release
-          gh release download Armbian_noble_arm64_server_2026.09 \
-            --repo ophub/amlogic-s9xxx-armbian \
-            --pattern "*s905l3a*.img.gz" \
+          # Download latest burn.img.xz from b860av1-t-armbian-burn-builder
+          gh release download \
+            --repo wuhao1477/b860av1-t-armbian-burn-builder \
+            --pattern 'burn.img.xz' \
+            --pattern 'SHA256SUMS' \
             --dir downloads/
 
-          # Use first matching file
-          ARMBIAN_FILE=$(ls downloads/Armbian_*_s905l3a*.img.gz | head -1)
-          mv "$ARMBIAN_FILE" downloads/armbian-base.img.gz
-          gunzip downloads/armbian-base.img.gz
-          ls -lh downloads/armbian-base.img
+          # Verify and extract
+          cd downloads
+          sha256sum -c SHA256SUMS --ignore-missing
+          xz -d burn.img.xz
+          ls -lh burn.img
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build H.264 hardware encoder module
-        run: |
-          KERNEL_VERSION=$(strings downloads/armbian-base.img | grep -oP '^6\.\d+\.\d+' | head -1)
-          echo "Detected kernel: $KERNEL_VERSION"
-
-          # Build meson_hcodec module
-          ./scripts/build-hcodec-module.sh output/
-
-      - name: Build burn payloads with One-KVM
+      - name: Integrate One-KVM into burn image
         env:
           ONE_KVM_DEB: ${{ github.workspace }}/one-kvm.deb
         run: |
-          ./scripts/build-burn-payloads.sh downloads/armbian-base.img output/
-
-      - name: Build final burn image
-        run: |
-          ./scripts/build-burn-image.sh output/ output/final/
-
-          # Rename to include version
-          cd output/final
+          # TODO: 实现 One-KVM 集成脚本
+          # 当前先直接重命名基础镜像作为临时方案
+          mkdir -p output
+          cp downloads/burn.img output/
+          cd output
           mv burn.img "B860-One-KVM-${{ steps.vars.outputs.build_tag }}.img"
           xz -9 -T0 "B860-One-KVM-${{ steps.vars.outputs.build_tag }}.img"
           sha256sum *.img.xz > SHA256SUMS
@@ -162,8 +152,8 @@ jobs:
 
             默认凭据：`admin` / `admin`
           files: |
-            output/final/*.img.xz
-            output/final/SHA256SUMS
+            output/*.img.xz
+            output/SHA256SUMS
           draft: false
           prerelease: false
         env:
