@@ -85,17 +85,6 @@ jobs:
           dpkg-deb -I one-kvm.deb
           ls -lh one-kvm.deb
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            mtools dosfstools xz-utils python3 python3-yaml nodejs npm \
-            libelf-dev bc bison flex gcc make kmod \
-            gcc-aarch64-linux-gnu
-
-      - name: Setup image tools
-        run: ./scripts/setup-image-tools.sh
-
       - name: Download B860 burn base image
         run: |
           mkdir -p downloads
