@@ -1,0 +1,154 @@
+name: Build B860 One-KVM Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      one_kvm_tag:
+        description: 'One-KVM release tag'
+        required: true
+        default: 'latest'
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly Sunday 3 AM UTC
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      one_kvm_tag: ${{ steps.check.outputs.one_kvm_tag }}
+      one_kvm_version: ${{ steps.check.outputs.one_kvm_version }}
+    steps:
+      - name: Check for new One-KVM release
+        id: check
+        run: |
+          ONE_KVM_LATEST=$(curl -s https://api.github.com/repos/mofeng-git/One-KVM/releases/latest | jq -r .tag_name)
+          ONE_KVM_VERSION=$(echo "$ONE_KVM_LATEST" | sed 's/^v//')
+
+          echo "one_kvm_tag=$ONE_KVM_LATEST" >> $GITHUB_OUTPUT
+          echo "one_kvm_version=$ONE_KVM_VERSION" >> $GITHUB_OUTPUT
+
+          # Check if this version already has a release
+          EXISTING=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases | \
+            jq -r "[.[] | select(.tag_name | contains(\"onekvm-$ONE_KVM_LATEST\"))] | length")
+
+          if [[ "$EXISTING" -eq 0 ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check-updates
+    if: needs.check-updates.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set build variables
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ONE_KVM_TAG="${{ github.event.inputs.one_kvm_tag }}"
+          else
+            ONE_KVM_TAG="${{ needs.check-updates.outputs.one_kvm_tag }}"
+          fi
+
+          if [[ "$ONE_KVM_TAG" == "latest" ]]; then
+            ONE_KVM_TAG=$(curl -s https://api.github.com/repos/mofeng-git/One-KVM/releases/latest | jq -r .tag_name)
+          fi
+
+          ONE_KVM_VERSION=$(echo "$ONE_KVM_TAG" | sed 's/^v//')
+          BASE_VERSION=$(git describe --tags --always)
+          BUILD_TAG="base-${BASE_VERSION}-onekvm-${ONE_KVM_TAG}"
+
+          echo "one_kvm_tag=$ONE_KVM_TAG" >> $GITHUB_OUTPUT
+          echo "one_kvm_version=$ONE_KVM_VERSION" >> $GITHUB_OUTPUT
+          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "build_tag=$BUILD_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download One-KVM
+        run: |
+          ONE_KVM_TAG="${{ steps.vars.outputs.one_kvm_tag }}"
+          ONE_KVM_VERSION="${{ steps.vars.outputs.one_kvm_version }}"
+
+          ONE_KVM_URL="https://github.com/mofeng-git/One-KVM/releases/download/${ONE_KVM_TAG}/one-kvm_${ONE_KVM_VERSION}_armhf.deb"
+
+          echo "Downloading from: $ONE_KVM_URL"
+          curl -L "$ONE_KVM_URL" -o one-kvm.deb
+
+          dpkg-deb -I one-kvm.deb
+          ls -lh one-kvm.deb
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            mtools dosfstools xz-utils python3 python3-yaml nodejs npm \
+            libelf-dev bc bison flex gcc make kmod
+
+      - name: Setup image tools
+        run: ./scripts/setup-image-tools.sh
+
+      - name: Download Armbian base image
+        run: |
+          mkdir -p downloads
+          # Use latest Armbian build for B860
+          ARMBIAN_URL="https://github.com/ophub/amlogic-s9xxx-armbian/releases/download/Armbian_noble_save_2024.11/Armbian_24.11.0_amlogic_s905l3a_noble_6.6.62_server_2024.11.10.img.gz"
+          curl -L "$ARMBIAN_URL" -o downloads/armbian-base.img.gz
+          gunzip downloads/armbian-base.img.gz
+
+      - name: Build H.264 hardware encoder module
+        run: |
+          KERNEL_VERSION=$(strings downloads/armbian-base.img | grep -oP '^6\.\d+\.\d+' | head -1)
+          echo "Detected kernel: $KERNEL_VERSION"
+
+          # Build meson_hcodec module
+          ./scripts/build-hcodec-module.sh downloads/armbian-base.img output/
+
+      - name: Build burn payloads with One-KVM
+        env:
+          ONE_KVM_DEB: ${{ github.workspace }}/one-kvm.deb
+        run: |
+          ./scripts/build-burn-payloads.sh downloads/armbian-base.img output/
+
+      - name: Build final burn image
+        run: |
+          ./scripts/build-burn-image.sh output/ output/final/
+
+          # Rename to include version
+          cd output/final
+          mv burn.img "B860-One-KVM-${{ steps.vars.outputs.build_tag }}.img"
+          xz -9 -T0 "B860-One-KVM-${{ steps.vars.outputs.build_tag }}.img"
+          sha256sum *.img.xz > SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.vars.outputs.build_tag }}
+          name: B860 One-KVM ${{ steps.vars.outputs.build_tag }}
+          body: |
+            B860AV1.1-T One-KVM 开箱即用固件
+
+            **One-KVM**: [${{ steps.vars.outputs.one_kvm_tag }}](https://github.com/mofeng-git/One-KVM/releases/tag/${{ steps.vars.outputs.one_kvm_tag }})
+            **Base**: B860 Armbian (ophub) with meson_hcodec V4L2 encoder
+
+            ## 特性
+
+            - ✅ One-KVM 预装并启用
+            - ✅ V4L2 硬件编码器（/dev/video0）已配置
+            - ✅ 开箱即用，刷完直接访问 http://<IP>:8080
+
+            ## 刷机
+
+            1. 解压 `*.img.xz`
+            2. 使用晶晨烧录工具刷入 B860AV1.1-T
+            3. 开机后访问 One-KVM：http://<设备IP>:8080
+
+            默认凭据：`admin` / `admin`
+          files: |
+            output/final/*.img.xz
+            output/final/SHA256SUMS
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

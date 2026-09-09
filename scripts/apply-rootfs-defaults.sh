@@ -357,3 +357,53 @@ $sudo test -f "$root_mount$hcodec_extra/meson_hcodec.ko" || {
   exit 1
 }
 say "已装 meson_hcodec.ko 到 $hcodec_extra（stage=1 开机自动加载）"
+
+# ---- 8. 注入 One-KVM（可选）-----------------------------------------------
+# 如果环境变量 ONE_KVM_DEB 指向一个 .deb 文件，注入到 rootfs 并启用服务。
+# 用于构建开箱即用的 One-KVM 固件。
+if [[ -n "${ONE_KVM_DEB:-}" && -f "$ONE_KVM_DEB" ]]; then
+  say "检测到 ONE_KVM_DEB=$ONE_KVM_DEB，开始注入 One-KVM"
+
+  # 验证是 armhf 架构
+  if ! dpkg-deb -I "$ONE_KVM_DEB" | grep -q "Architecture: armhf"; then
+    echo "ONE_KVM_DEB 不是 armhf 架构" >&2
+    exit 1
+  fi
+
+  # 解压 deb 到 rootfs
+  $sudo dpkg-deb -x "$ONE_KVM_DEB" "$root_mount/"
+
+  # 验证二进制已安装
+  if ! $sudo test -f "$root_mount/usr/bin/one-kvm"; then
+    echo "One-KVM 二进制未找到" >&2
+    exit 1
+  fi
+
+  # 启用 systemd 服务
+  if $sudo test -f "$root_mount/lib/systemd/system/one-kvm.service"; then
+    $sudo mkdir -p "$root_mount/etc/systemd/system/multi-user.target.wants"
+    $sudo ln -sf /lib/systemd/system/one-kvm.service \
+      "$root_mount/etc/systemd/system/multi-user.target.wants/one-kvm.service"
+    say "已启用 one-kvm.service"
+  fi
+
+  # 配置硬件编码器后端
+  $sudo mkdir -p "$root_mount/etc/one-kvm"
+  $sudo tee "$root_mount/etc/one-kvm/encoder.conf" >/dev/null <<'ENCODER_CONF'
+backend=v4l2m2m
+device=/dev/video0
+ENCODER_CONF
+  say "已配置 One-KVM 使用 V4L2 硬件编码器（/dev/video0）"
+
+  # 写入版本信息
+  one_kvm_version=$(dpkg-deb -f "$ONE_KVM_DEB" Version 2>/dev/null || echo "unknown")
+  $sudo tee "$root_mount/etc/b860-one-kvm-release" >/dev/null <<EOF
+ONE_KVM_VERSION=$one_kvm_version
+BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BASE_BUILDER=b860av1-t-armbian-burn-builder
+EOF
+
+  say "已注入 One-KVM $one_kvm_version（开箱即用）"
+else
+  say "未检测到 ONE_KVM_DEB 环境变量，跳过 One-KVM 注入"
+fi
