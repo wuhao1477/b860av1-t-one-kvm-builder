@@ -3,8 +3,8 @@
 实机（Armbian 26.11.0 / 5.10.268-ophub）已经能正常使用，下面是还没解决的。
 每条都带实测证据和修它需要动什么，方便接手的人直接开工。
 
-**还开着的：2、3、4、8、9。**
-第 1、5、6、7 条已修复或已排除，保留下来是因为踩坑本身有价值。
+**还开着的：2、3、4、8、9，以及第 10 条里 MPEG-2 那一半。**
+第 1、5、6、7 条已修复或已排除，第 10 条的 H.264 已修复；保留下来是因为踩坑本身有价值。
 
 ## 1. eMMC 停在 25 MHz legacy 模式
 
@@ -356,6 +356,16 @@ journald 起来之前，所以日志里看不到）。
 常规文件。两条 drop-in（`sysinit.target.d` 的 zram、`multi-user.target.d` 的
 expand-rootfs）在 `build-49.1` 上都按预期起来了。
 
+**`v1.0.0` 首刷第三次复现，一模一样（2026-09-04）。** 同一份镜像换一次刷入，
+`sysinit.target.wants/` 里的 zram 链接又没了、`multi-user.target.wants/` 里的
+expand 链接又活着；两个服务都靠 drop-in 起来了，`swapon --show` 是 `/dev/zram0 400.3M`，
+根分区首次开机自己撑到 5.1G。所以这是稳定可复现的目录级现象，不是偶发。
+
+**`build-50.1` 第四次复现（2026-09-05）。** 换了一份新镜像（多三个微码文件）结果不变：
+`sysinit.target.wants/armbian-zram-config.service` 又没了，同一目录下同一毫秒写的
+`sysinit.target.d/10-b860-armbian-zram-config.conf` 在，zram 照样 400.3M 起来。
+四次都指向同一个结论：**符号链接不可靠，drop-in 常规文件可靠。**
+
 ## 9. 内核线 2026-12-31 EOL，且没有保住 WiFi 的升级路线
 
 **已知、无解，只能等移植。** 当前钉死在 5.10.268（[`frozen-inputs.md`](frozen-inputs.md)）。
@@ -372,3 +382,78 @@ ophub 的 `kernel-config/release/stable/config-*` 里 `CONFIG_RTL8189FS=m` 只�
 
 在那之前：用户态照常 `apt full-upgrade` 就能跟上（rootfs 里没有 `linux-image-*`，
 `apt` 碰不到启动路径，见第 2 条），只是换不了内核。
+
+## 10. 硬件解码缺微码（H.264 已修，MPEG-2 是驱动的问题）
+
+**H.264 已修复并实机验证（2026-09-05）。** 上游 Armbian 镜像里 `/lib/firmware/meson/`
+**整个目录都不存在**，而 `meson-vdec` 是在 `VIDIOC_STREAMON` 那一刻才
+`request_firmware` —— 所以：
+```
+/dev/video0                      在（meson-video-decoder，platform:meson-vdec）
+枚举 OUT 格式                     VP90 / H264 / MPG1 / MPG2，CAP 是 NM12
+VIDIOC_STREAMON                  -1 (Invalid argument)
+dmesg                            Direct firmware load for meson/vdec/gxl_h264.bin
+                                 failed with error -2
+```
+
+**这是本条最大的坑**：设备节点在、格式也枚举得出，看起来像驱动坏了或者硬件不支持，
+`dmesg` 在你真去解码之前一个字都不提固件。
+
+双向对照过（同一块板，同一次开机）：
+
+```
+有 gxl_h264.bin   20 帧全解出来，29,491,200 字节 = 20 × 1,474,560
+                  NM12 1280×720，高度按 64 对齐成 768 → 1280×768×1.5
+                  第 0 帧导出成 PNG 肉眼确认就是 ffmpeg testsrc 的图案，颜色和几何都对
+挪走 gxl_h264.bin VIDIOC_STREAMON returned -1，dmesg 回到 error -2
+```
+
+修复方式：[`scripts/fetch-vdec-firmware.sh`](../scripts/fetch-vdec-firmware.sh) 按
+`config/board.json` 的 `vdecFirmware`（linux-firmware 固定 commit + 每个文件的 sha256）
+下载，`apply-rootfs-defaults.sh` §6 装到 `/lib/firmware/meson/vdec/`，
+`build-burn-payloads.sh` 再用 `debugfs` 在要 sparse 的那份 ext4 上逐个复查。
+微码不入库：仓库只放源码（CI 的 `inspectTrackedFiles` 盯着），而且这几个 `.bin` 是
+Amlogic 的可再分发二进制，不是 MIT。
+
+**`build-50.1` 刷机复验通过（2026-09-05）**，这次是「从包里出来的」而不是手工放的：
+
+```
+是新镜像            up 5 min；SSH host key 变了；上一刷 apt 装的 v4l-utils 不在了
+微码                三个 .bin 的 sha256 与 board.json 逐字节一致
+dmesg               meson 固件错误 0 条
+解码                29,491,200 字节 = 20 × 1,474,560，第 0 帧 PNG 就是 testsrc 图案
+其余六项            root/password SSH、zsh、根分区 5.1G、zram 400.3M、无首登标记、
+                    wait-online disabled；首刷含 resize 30.7 s 进系统
+```
+
+解码时 `dmesg` 会刷一串 `Buffer N done but can't match offset (…)`，但帧数和字节数
+都对、画面也对 —— 那是 `meson-vdec` 匹配时间戳的噪音，**不要和下面 MPEG-2 那条
+`doesn't exist in m2m_ctx` 搞混**，后者是真的没出帧。
+
+复现（板上，`v4l-utils`）：
+
+```bash
+# 单个 IDR 帧不够，只会出 SOURCE CHANGE EVENT + 0 字节文件，要多帧片段。
+# 别加 -bsf:v h264_mp4toannexb：h264 muxer 出来已经是 Annex-B，加了会写出 0 字节。
+ffmpeg -f lavfi -i testsrc=size=1280x720:rate=25:duration=2 \
+  -c:v libx264 -profile:v baseline -pix_fmt yuv420p -g 25 -f h264 test720p.h264
+v4l2-ctl -d /dev/video0 \
+  --set-fmt-video-out=width=1280,height=720,pixelformat=H264 \
+  --stream-out-mmap --stream-from=test720p.h264 \
+  --stream-mmap --stream-to=dec.nm12 --stream-count=20
+# 看图：单帧 1280×768（720 按 64 对齐），底部 48 行绿边就是那圈对齐填充
+head -c 1474560 dec.nm12 > frame0.nm12
+ffmpeg -f rawvideo -pix_fmt nv12 -s 1280x768 -i frame0.nm12 -frames:v 1 frame0.png
+```
+
+**还开着的部分：MPEG-2 解不出来，但不是微码的事。** `gxl_mpeg12.bin` 装上之后
+`dmesg` 里没有任何固件错误（说明加载成功），但：
+
+```
+dmesg                Buffer N done but it doesn't exist in m2m_ctx
+v4l2-ctl             VIDIOC_DQBUF: failed: Invalid argument
+```
+
+这是 `meson-vdec` MPEG1/2 那条路的驱动缺陷，修它要动内核。`gxl_mpeg12.bin` 和
+`gxl_vp9.bin` 照样进包（驱动确实在枚举 `MPG2` / `VP90`），但**别声称它们能用**：
+VP9 也没法用 `v4l2-ctl` 验（VP9 没有起始码分帧，IVF 头会被当成码流喂进去）。

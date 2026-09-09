@@ -14,13 +14,31 @@
 
 | 产物 | 状态 | 说明 |
 |---|---|---|
-| **`burn.img` 直刷包（变体 C）** | **`hardware-verified`** | 2026-09-03 实机刷入、进系统、六项预置全过、eMMC DDR52 82 MB/s，见 [`docs/burn-image.md`](docs/burn-image.md) |
+| **`burn.img` 直刷包（变体 C）** | **`hardware-verified`** | 2026-09-03 实机刷入、进系统、六项预置全过、eMMC DDR52 82 MB/s；2026-09-04 换一次刷入复验；2026-09-05 `build-50.1` 再刷一次，七项预置全过（多了 H.264 硬解），见 [`docs/burn-image.md`](docs/burn-image.md) |
 | Armbian raw `.img.gz` | `container-valid / hardware-unverified` | 只做过容器与文件系统静态校验 |
 
-直接下载：[**latest release 的 `burn.img.xz`**](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/latest)
-（`burn.img` sha256 `2303d1c5…`，即下面表里的 `build-49.1`，六项预置全部实机验证通过：
+直接下载：[**`v1.0.0` 的 `burn.img.xz`**](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/latest)
+（解压后 `burn.img` sha256 `2303d1c5…`，六项预置全部实机验证通过：
 `root` / `password` 直接 SSH、zsh、根分区 5.1G、zram 400 MB、无首登向导、不等网络）。
 刷之前先看 [`docs/burn-image.md#刷机步骤`](docs/burn-image.md)——**「擦除 flash」必须勾**。
+
+**要 H.264 硬解就下 `build-50.1`**（`v1.0.0` 里没有微码）。这份字节 2026-09-05 也实机
+刷过、七项预置全过，只是还没接掉 `latest`。
+
+**要刷机只下 `latest`（现在是 `v1.0.0`）。** 其余 release 一律是 `Pre-release`，都不是
+拿来刷的：
+
+| tag | 是什么 | 能刷吗 |
+|---|---|---|
+| `v1.0.0`（`latest`） | 直刷包，**这份字节流本身实机验证过** | **能** |
+| `b860-burn-…-build-50.1` | 多了 `meson-vdec` 微码（H.264 硬解），**这份字节也实机验证过** | 能 |
+| 其余 `b860-burn-*-build-N.M` | 每周自动出的直刷包，策略一致，但那些字节没上过机 | 自担风险 |
+| `armbian-*-build-N.M` | raw `.img.gz` 线的每周产物，只做过容器与文件系统静态校验 | 不能直刷 |
+| `input-armbian-*` | 冻结的上游输入镜像，是构建的原料不是产物 | 否 |
+
+之前那批预置不完整的 `b860-burn-*`（`build-43.1` … `build-49.1`）已全部删除，避免有人
+下错来刷；`v1.0.0` 就是 `build-49.1` 那份实机验证过的字节，同一个 sha256。各项预置是
+怎么一步步补齐的，记在 [`docs/known-issues.md`](docs/known-issues.md) 第 7 条。
 
 **刷完直接能用，没有首次开机向导。** 镜像里由
 [`scripts/apply-rootfs-defaults.sh`](scripts/apply-rootfs-defaults.sh) 预置好：
@@ -31,27 +49,14 @@
 | 口令 | `/etc/shadow` 里钉死的 `$6$` 哈希（`openssl passwd -6 -salt b860burn password`）；删了首登向导就没人再设口令，不钉死等于发一个口令未知的包 |
 | shell | zsh 5.9 + oh-my-zsh（改 `root_shell` 一行可换 bash） |
 | 根分区 | 首次开机 `resize2fs` 自己撑满 `data` 分区（8 GB eMMC 上 2.9G → 5.1G，实机确认） |
-| swap | zram 400 MB（`armbian-zram-config`，`build-48.1` 起才真的起来） |
-| 开机 | 禁用 `NetworkManager-wait-online`，实机 24.3 s 进系统 |
+| swap | zram 400 MB（`armbian-zram-config`，靠 `sysinit.target.d` drop-in 起来） |
+| 开机 | 禁用 `NetworkManager-wait-online`，实机 24.3 s 进系统（首刷含 resize 30.6 s） |
+| 硬解 | `meson-vdec` 微码装在 `/lib/firmware/meson/vdec/`，H.264 实机解通（上游镜像里这个目录整个不存在，缺了 `VIDIOC_STREAMON` 直接 `-EINVAL`，见 [`docs/known-issues.md`](docs/known-issues.md) 第 10 条）。**`v1.0.0` 里没有，`build-50.1` 起才有** |
 
-**别按 tag 名去挑历史 prerelease。** Release tag 结尾的 `build-<运行号>` 是本仓库的构建
-序号（中间那个 `build-46.1` 是上游 raw release，别混）。仓库里还留着几个预置不完整的
-prerelease，下面这张表说明哪些不能刷 —— 下 `latest` 就不用管它：
-
-| 运行 | 预置 | 刷完能不能进系统 |
-|---|---|---|
-| `build-44.1` | 无 | 能，走首登向导现场设口令 |
-| `build-45.1` | 有，但首登标记没真删掉 | 能，同上 |
-| `build-46.1` | 有，标记删了却**没钉口令** | **不能** —— root 口令是上游出厂哈希，明文未知 |
-| `build-47.1` | 除 swap 全部实机验证通过 | 能，`root` / `password`；只是没有 swap |
-| `build-48.1` | 差根分区没撑满（2.9G）；其余 5 项实机验证通过 | 能 |
-| **`build-49.1`（= latest release）** | 完整，六项全部实机验证通过 | 能 |
-
-`build-47.1` 的完整实机结果、以及 swap 为什么没起来（构建时写进 rootfs 的 `*.wants`
-符号链接一条都没进镜像，同一毫秒写的常规文件全在），见
-[`docs/known-issues.md`](docs/known-issues.md) 第 7、8 条。换成 drop-in 的那条路已经
-在实机上单独验证过：把链接删干净、只留 `sysinit.target.d/` 里的 drop-in，冷重启后
-`swapon --show` 就是 `/dev/zram0 400.3M`。
+swap 为什么一开始没起来（构建时写进 rootfs 的 `*.wants` 符号链接一条都没进镜像，同一
+毫秒写的常规文件全在），见 [`docs/known-issues.md`](docs/known-issues.md) 第 7、8 条。
+换成 drop-in 的那条路已经在实机上验证过三次：`sysinit.target.wants/` 里的链接照旧
+不见，冷重启后 `swapon --show` 仍是 `/dev/zram0 400.3M`。
 
 WiFi 密码不进仓库（CI 产物是公开的）。要预置就在本地放 `board-inputs/wifi.env`
 写两行 `WIFI_SSID=` / `WIFI_PSK=` 再自己构建；细节见
@@ -75,13 +80,16 @@ HDMI   card0-HDMI-A-1 connected     eMMC DDR52 82 MB/s (/dev/mmcblk2p14 ext4)
 | [`docs/burn-image.md`](docs/burn-image.md) | **直刷包的设计、三次实机全黑的根因、刷机步骤** |
 | [`docs/frozen-inputs.md`](docs/frozen-inputs.md) | **冻结了哪些输入、怎么重钉、内核线为什么停在 5.10** |
 | [`docs/known-issues.md`](docs/known-issues.md) | 待解决问题，每条带证据和修它要动什么 |
+| [`docs/hardware-probes.md`](docs/hardware-probes.md) | **实机 `/dev/mem` 探测结论：HCODEC 硬编块是活的，附会让板子重启的坑** |
+| [`docs/hcodec-encoder-plan.md`](docs/hcodec-encoder-plan.md) | 硬件编码驱动的三阶段实施规划 |
 | [`docs/device-validation.md`](docs/device-validation.md) | raw 镜像那条线的实机证据采集流程 |
 | [`docs/history/`](docs/history/) | 早期设计文档，已被取代，只作溯源 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 本地怎么跑、提 PR 的要求、迭代入口 |
 
 ```
 scripts/build-burn-payloads.sh         从 raw 镜像做 boot/data 载荷 + rootfs 预置
-scripts/apply-rootfs-defaults.sh       开箱即用项（口令、shell、zram、resize2fs）
+scripts/apply-rootfs-defaults.sh       开箱即用项（口令、shell、zram、resize2fs、vdec 微码）
+scripts/fetch-vdec-firmware.sh         按 board.json 钉死的 commit + sha256 下 vdec 微码
 scripts/build-vendor-boot-burn.sh      变体 C 构建器（唯一实机验证过的）
 scripts/validate-vendor-boot-burn.sh   独立复核交付件
 scripts/setup-image-tools.sh           按 config 钉死的 commit 编 ampack / gxlimg
@@ -112,24 +120,28 @@ gh workflow run verify-device.yml \
 
 通过后只为该 Release 增加 `operator-attested / one-device` 资产；原始 `validation-report.json` 继续保持 `container-valid / hardware-unverified`。这是单台设备的操作者证据，不是远程密码学硬件证明，也不代表所有硬件批次已经适配。
 
-本仓库公开发布的是 USB Burning Tool 的 `burn.img.xz`（raw `.img.gz` 由上游那个仓库发）；直刷包随附 `vendor-boot-contract.json`（Android boot 头部、cmdline、root UUID）和 `burn-dtb-contract.json`（`meson1.dtb` 的 7 个 sub-DTB 槽位与替换结果），再加一份 `SHA256SUMS`。CI 里的自动校验只能证明容器结构和设备树自洽；变体 C 的可启动结论来自机主实机刷入，不是构建成功推出来的。设备证据流程仍只针对 raw 镜像。
+本仓库发布两类包：USB Burning Tool 的 `burn.img.xz`（`b860-burn-*`）和 raw `.img.gz`（`armbian-*`，直刷包的输入源）。直刷包随附 `vendor-boot-contract.json`（Android boot 头部、cmdline、root UUID）和 `burn-dtb-contract.json`（`meson1.dtb` 的 7 个 sub-DTB 槽位与替换结果），再加一份 `SHA256SUMS`。CI 里的自动校验只能证明容器结构和设备树自洽；变体 C 的可启动结论来自机主实机刷入，不是构建成功推出来的。设备证据流程仍只针对 raw 镜像。
 
 ## 自动构建
 
-两个仓库，别混：
+**一个仓库，两条线。** 早期 raw 那条线在另一个仓库，那个仓库其实是本仓库的子集
+（119 个文件里 94 个逐字节相同），两边还在跑同一条 cron 出同一份 raw 包。已经合并进
+本仓库，原仓库转为私有，不再产出任何东西。构建、发布、实机证据全部只依赖本仓库。
 
-| 仓库 | 产出 | workflow |
+| 线 | 产出 | workflow |
 |---|---|---|
-| [`b860av1-t-armbian-builder`](https://github.com/wuhao1477/b860av1-t-armbian-builder) | raw `armbian-*` release（本仓库的输入） | 那边的 `weekly-build.yml` |
-| 本仓库 | `b860-burn-*` 直刷包 | [`weekly-burn-build.yml`](.github/workflows/weekly-burn-build.yml) |
+| 直刷包 | `b860-burn-*` release（`burn.img.xz`） | [`weekly-burn-build.yml`](.github/workflows/weekly-burn-build.yml) |
+| raw 镜像 | `armbian-*` prerelease（直刷包的输入源） | [`weekly-build.yml`](.github/workflows/weekly-build.yml) |
 
-本仓库也带一份休眠的 raw 构建线（`weekly-build.yml`、[`config/sources.json`](config/sources.json)、
-`scripts/build-raw-image.sh`），当前不发 raw 包，留着是为了两条线的输入口径一致。
+直刷包的输入自托管：那份实机验证过的 raw 资产逐字节镜像在本仓库的
+[`input-armbian-…-build-46.1`](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/input-armbian-26.11.0-debian-13.6-trixie-k5.10.268-build-46.1)
+里，`SOURCE_DIGEST` 与合并前完全一致。
 
-**直刷包的输入是冻结的。** `weekly-burn-build.yml` 顶部钉死 `SOURCE_RELEASE` /
-`SOURCE_ASSET` / `SOURCE_DIGEST`，`detect` 只核对不选新；`config/sources.json` 把内核钉在
-`5.10.268` 并校验摘要。上游改了东西 CI 会红，不会自己出新包 ——
-重钉步骤见 [`docs/frozen-inputs.md`](docs/frozen-inputs.md)。
+**直刷包的输入是冻结的。** `weekly-burn-build.yml` 顶部钉死 `SOURCE_REPOSITORY` /
+`SOURCE_RELEASE` / `SOURCE_ASSET` / `SOURCE_DIGEST`，`detect` 只核对不选新；
+`config/sources.json` 把内核钉在 `5.10.268` 并校验摘要。输入变了 CI 会红，不会自己出新包 ——
+重钉步骤见 [`docs/frozen-inputs.md`](docs/frozen-inputs.md)。raw 那条线每周照常跑，
+但它产出的新 `armbian-*` 包不会自动成为直刷包的输入。
 
 下面出现两个独立编号的 schema，不要混淆：
 
@@ -161,7 +173,7 @@ gh workflow run verify-device.yml \
 手动启动直刷包构建：打开 [Weekly burn image](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/actions/workflows/weekly-burn-build.yml)，
 选择 **Run workflow**，把 `force` 设为 `true`。必须在默认分支上跑 —— `detect` 带
 `if: github.ref_name == default_branch`，feature 分支只会跑诊断 job，产不出包。
-raw 那条线在[另一个仓库](https://github.com/wuhao1477/b860av1-t-armbian-builder/actions/workflows/weekly-build.yml)。
+raw 那条线是同一个仓库里的 [`weekly-build.yml`](.github/workflows/weekly-build.yml)。
 
 ## burn.img 直刷包
 

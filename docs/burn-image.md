@@ -5,9 +5,9 @@ Burning Tool 能直接刷的 `burn.img`，刷完开机就是 Debian/Armbian。
 
 ## 当前状态
 
-**变体 C 已在实机验证。** 交付的那一份是 `build-49.1`，`burn.img` sha256
+**变体 C 已在实机验证。** 交付的那一份是 `v1.0.0`（构建序号 `build-49.1`），`burn.img` sha256
 `2303d1c58b0061e9a70d6159e27e546c382d06cf792f3680d69f3659b8f02822`。刷完直接进系统，
-不走首次开机向导，六项预置全部实机确认（2026-09-03）：
+不走首次开机向导，六项预置全部实机确认（2026-09-03 首次，2026-09-04 换一次刷入复验）：
 
 ```
 Armbian OS 26.11.0 trixie / Debian GNU/Linux 13
@@ -188,6 +188,18 @@ bootloader 4M@0  →  reserved 64M@36M  →  cache（提到最前，从 108M 起
 | A | 原厂签名段 + 主线 U-Boot v2026.01 BL33 + FAT16/extlinux | `build-burn-image.sh` | 实机全黑，根因 1 |
 | B | 原厂签名段 + ophub BL33 + rootfs 内 `/boot` | `build-ophub-bl33-burn.sh` | 实机全黑，根因 1 |
 | C | 厂商 bootloader 逐字节不改 + Android boot 镜像 | `build-vendor-boot-burn.sh` | **实机可启动** |
+
+那段全黑期的开发分支没有合进 `main`，也不占 tag / 分支列表，存在远端的 `refs/archive/*`
+下面（`git push --tags` 碰不到它们）。要翻当时的实现：
+
+```bash
+git fetch origin 'refs/archive/*:refs/archive/*'
+git log --oneline main..refs/archive/codex-fix-b860-emmc-50mhz      # 改用 R3300L 参考启动链
+git log --oneline main..refs/archive/codex-restore-stock-bl33       # 原厂内核诊断包
+git log --oneline main..refs/archive/feat-diagnostic-hdmi-console   # HDMI 诊断 / SD 卡启动
+```
+
+结论本身都在这一页和 [`known-issues.md`](known-issues.md) 里，翻分支只在要复现测量时才需要。
 
 ## 构建与校验
 
