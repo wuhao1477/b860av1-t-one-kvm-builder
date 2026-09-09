@@ -69,12 +69,18 @@ jobs:
       - name: Download One-KVM
         run: |
           ONE_KVM_TAG="${{ steps.vars.outputs.one_kvm_tag }}"
-          ONE_KVM_VERSION="${{ steps.vars.outputs.one_kvm_version }}"
 
-          ONE_KVM_URL="https://github.com/mofeng-git/One-KVM/releases/download/${ONE_KVM_TAG}/one-kvm_${ONE_KVM_VERSION}_armhf.deb"
+          # Get actual deb filename from release
+          ONE_KVM_DEB_URL=$(curl -s "https://api.github.com/repos/mofeng-git/One-KVM/releases/tags/${ONE_KVM_TAG}" | \
+            jq -r '.assets[] | select(.name | endswith("_armhf.deb")) | .browser_download_url')
 
-          echo "Downloading from: $ONE_KVM_URL"
-          curl -L "$ONE_KVM_URL" -o one-kvm.deb
+          if [[ -z "$ONE_KVM_DEB_URL" ]]; then
+            echo "Error: armhf deb not found in release ${ONE_KVM_TAG}"
+            exit 1
+          fi
+
+          echo "Downloading from: $ONE_KVM_DEB_URL"
+          curl -L "$ONE_KVM_DEB_URL" -o one-kvm.deb
 
           dpkg-deb -I one-kvm.deb
           ls -lh one-kvm.deb
