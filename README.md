@@ -5,6 +5,8 @@ Armbian-based Linux firmware for ZTE ZXV10 B860AV1.1-T set-top box with **hardwa
 [![GitHub Release](https://img.shields.io/github/v/release/wuhao1477/b860av1-t-armbian-burn-builder)](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+English | [简体中文](README.zh-CN.md)
+
 ## Features
 
 - 🔥 **Ready-to-flash image** for USB Burning Tool — no configuration needed
