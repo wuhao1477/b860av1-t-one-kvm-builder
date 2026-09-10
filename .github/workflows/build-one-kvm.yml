@@ -48,9 +48,9 @@ jobs:
       - name: Download and build ampack
         run: |
           mkdir -p .tools/bin
-          git clone https://github.com/7Ji/ampart.git .tools/ampart-src
-          cd .tools/ampart-src
-          git checkout 71a7ca46fa75c31e3eef4895f0e90c77a815e9aa
+          git clone https://github.com/7Ji/ampack.git .tools/ampack-src
+          cd .tools/ampack-src
+          git checkout 46066067b2b06c387df14243e301742644aa77a1
           cargo build --release
           install -m 0755 target/release/ampack ../../.tools/bin/ampack
           cd ../..
