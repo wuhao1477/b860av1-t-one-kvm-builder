@@ -71,62 +71,62 @@ jobs:
           du -sh output/*
 
       - name: Create release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.vars.outputs.build_tag }}
-          name: B860 One-KVM ${{ steps.vars.outputs.build_tag }}
-          body: |
-            # B860 One-KVM 开箱即用固件
-
-            **Base**: B860 Armbian [${{ steps.vars.outputs.b860_tag }}](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/${{ steps.vars.outputs.b860_tag }})
-            **One-KVM**: [${{ steps.vars.outputs.one_kvm_tag }}](https://github.com/mofeng-git/One-KVM/releases/tag/${{ steps.vars.outputs.one_kvm_tag }})
-
-            ## 特性
-
-            - ✅ One-KVM 预装并启用
-            - ✅ V4L2 硬件编码器（`/dev/video0`）已配置
-            - ✅ 刷机即用，访问 `http://<设备IP>:8080`
-
-            ## 刷机步骤
-
-            1. 下载 `B860-One-KVM-*.burn.img.xz`
-            2. 解压：`xz -d B860-One-KVM-*.burn.img.xz`
-            3. 使用 **晶晨 USB 烧录工具** 刷写
-            4. 勾选 **"擦除 flash" + "擦除 bootloader"**
-            5. 刷机完成后访问 One-KVM
-
-            ## 默认凭据
-
-            - SSH: `root` / `password`
-            - One-KVM: `admin` / `admin`
-
-            ## 硬件支持
-
-            - Amlogic S905L3-B (四核 Cortex-A55, 1.8 GHz)
-            - H.264 硬件编码器 (V4L2 M2M, 最高 1920x1088)
-            - 100 Mbps 有线网络, RTL8189FTV Wi-Fi
-            - 8 GB eMMC, 1 GB RAM
-
-            ## 验证
-
-            SSH 登录后验证硬件编码器：
-            ```bash
-            v4l2-ctl -d /dev/video0 -D
-            # 应显示: Driver name: meson_hcodec
-            ```
-
-            ## 文档
-
-            - [快速开始](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/blob/main/QUICKSTART.md)
-            - [构建指南](https://github.com/wuhao1477/b860av1-t-one-kvm-builder/blob/main/BUILDING.md)
-
-            ---
-
-            ⚠️ **免责声明**: 刷写自定义固件可能使保修失效。风险自负。
-          files: |
-            output/*.img.xz
-            output/SHA256SUMS
-          draft: false
-          prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.build_tag }}
+          B860_TAG: ${{ steps.vars.outputs.b860_tag }}
+          ONEKVM_TAG: ${{ steps.vars.outputs.one_kvm_tag }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          # B860 One-KVM 开箱即用固件
+
+          **Base**: B860 Armbian [${{ steps.vars.outputs.b860_tag }}](https://github.com/wuhao1477/b860av1-t-armbian-burn-builder/releases/tag/${{ steps.vars.outputs.b860_tag }})
+          **One-KVM**: [${{ steps.vars.outputs.one_kvm_tag }}](https://github.com/mofeng-git/One-KVM/releases/tag/${{ steps.vars.outputs.one_kvm_tag }})
+
+          ## 特性
+
+          - ✅ One-KVM 预装并启用
+          - ✅ V4L2 硬件编码器（`/dev/video0`）已配置
+          - ✅ HCODEC 驱动超时修复（2000ms + 3次重试）
+          - ✅ USB OTG 自动 device 模式
+          - ✅ 刷机即用，访问 `http://<设备IP>:8080`
+
+          ## 刷机步骤
+
+          1. 下载 `B860-One-KVM-*.burn.img.xz`
+          2. 解压：`xz -d B860-One-KVM-*.burn.img.xz`
+          3. 使用 **晶晨 USB 烧录工具** 刷写
+          4. 勾选 **"擦除 flash" + "擦除 bootloader"**
+          5. 刷机完成后访问 One-KVM
+
+          ## 默认凭据
+
+          - SSH: `root` / `password`
+          - One-KVM: `admin` / `admin`
+
+          ## 硬件支持
+
+          - Amlogic S905L3-B (四核 Cortex-A55, 1.8 GHz)
+          - H.264 硬件编码器 (V4L2 M2M, 最高 1920x1088)
+          - 100 Mbps 有线网络, RTL8189FTV Wi-Fi
+          - 8 GB eMMC, 1 GB RAM
+
+          ## 验证
+
+          SSH 登录后验证硬件编码器：
+          ```bash
+          v4l2-ctl -d /dev/video0 -D
+          # 应显示: Driver name: meson_hcodec
+
+          # 检查驱动参数
+          cat /sys/module/meson_hcodec/parameters/waitms
+          # 应显示: 2000
+          ```
+
+          ⚠️ **免责声明**: 刷写自定义固件可能使保修失效。风险自负。
+          EOF
+
+          gh release create "$TAG" output/*.img.xz output/SHA256SUMS \
+            --repo ${{ github.repository }} \
+            --title "B860 One-KVM $TAG" \
+            --notes-file release-notes.md
