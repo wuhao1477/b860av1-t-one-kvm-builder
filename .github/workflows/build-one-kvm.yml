@@ -67,6 +67,7 @@ jobs:
 
       - name: Integrate One-KVM
         run: |
+          mkdir -p mnt out
           .tools/bin/ampack unpack dl/burn.img work/
           sudo losetup -f --show work/data.PARTITION > loop.txt
           LOOP=$(cat loop.txt)
