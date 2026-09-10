@@ -2,163 +2,92 @@ name: Build B860 One-KVM Firmware
 
 on:
   workflow_dispatch:
-    inputs:
-      one_kvm_tag:
-        description: 'One-KVM release tag'
-        required: true
-        default: 'latest'
   schedule:
-    - cron: '0 3 * * 0'  # Weekly Sunday 3 AM UTC
+    - cron: '17 3 * * 0'
 
 permissions:
   contents: write
 
 jobs:
-  check-updates:
+  check:
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
-      one_kvm_tag: ${{ steps.check.outputs.one_kvm_tag }}
-      one_kvm_version: ${{ steps.check.outputs.one_kvm_version }}
+      burn_tag: ${{ steps.check.outputs.burn_tag }}
+      onekvm_tag: ${{ steps.check.outputs.onekvm_tag }}
+      fingerprint: ${{ steps.check.outputs.fingerprint }}
     steps:
-      - name: Check for new One-KVM release
-        id: check
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ONE_KVM_LATEST=$(curl -s https://api.github.com/repos/mofeng-git/One-KVM/releases/latest | jq -r '.tag_name // "v260802"')
-          ONE_KVM_VERSION=$(echo "$ONE_KVM_LATEST" | sed 's/^v//')
+          BURN_TAG=$(gh api repos/wuhao1477/b860av1-t-armbian-burn-builder/releases \
+            --jq '[.[] | select(.prerelease and (.tag_name | startswith("b860-burn-")))] | first | .tag_name')
+          ONEKVM_TAG=$(gh api repos/mofeng-git/One-KVM/releases/latest --jq .tag_name)
+          FINGERPRINT=$(printf '%s\n%s' "$BURN_TAG" "$ONEKVM_TAG" | sha256sum | awk '{print $1}')
 
-          echo "one_kvm_tag=$ONE_KVM_LATEST" >> $GITHUB_OUTPUT
-          echo "one_kvm_version=$ONE_KVM_VERSION" >> $GITHUB_OUTPUT
+          PREV=$(gh api repos/${{ github.repository }}/releases --jq '[.[] | select(.body | contains("'"$FINGERPRINT"'"))] | length')
 
-          # Check if this version already has a release
-          EXISTING=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases | \
-            jq -r "[.[] | select(.tag_name | contains(\"onekvm-$ONE_KVM_LATEST\"))] | length" || echo "0")
-
-          if [[ "$EXISTING" -eq 0 ]]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          fi
+          echo "burn_tag=$BURN_TAG" >> $GITHUB_OUTPUT
+          echo "onekvm_tag=$ONEKVM_TAG" >> $GITHUB_OUTPUT
+          echo "fingerprint=$FINGERPRINT" >> $GITHUB_OUTPUT
+          echo "should_build=$([[ "$PREV" -eq 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
   build:
-    needs: check-updates
-    if: needs.check-updates.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch'
+    needs: check
+    if: needs.check.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set build variables
-        id: vars
+      - name: Install tools
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            ONE_KVM_TAG="${{ github.event.inputs.one_kvm_tag }}"
-          else
-            ONE_KVM_TAG="${{ needs.check-updates.outputs.one_kvm_tag }}"
-          fi
+          sudo apt-get update
+          sudo apt-get install -y xz-utils kpartx
+          ./scripts/setup-image-tools.sh
 
-          if [[ "$ONE_KVM_TAG" == "latest" ]]; then
-            ONE_KVM_TAG=$(curl -s https://api.github.com/repos/mofeng-git/One-KVM/releases/latest | jq -r .tag_name)
-          fi
-
-          ONE_KVM_VERSION=$(echo "$ONE_KVM_TAG" | sed 's/^v//')
-          BASE_VERSION=$(git describe --tags --always)
-          BUILD_TAG="base-${BASE_VERSION}-onekvm-${ONE_KVM_TAG}"
-
-          echo "one_kvm_tag=$ONE_KVM_TAG" >> $GITHUB_OUTPUT
-          echo "one_kvm_version=$ONE_KVM_VERSION" >> $GITHUB_OUTPUT
-          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
-          echo "build_tag=$BUILD_TAG" >> $GITHUB_OUTPUT
-
-      - name: Download One-KVM
+      - name: Download base burn.img
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ONE_KVM_TAG="${{ steps.vars.outputs.one_kvm_tag }}"
-
-          # Get actual deb filename from release
-          ONE_KVM_DEB_URL=$(curl -s "https://api.github.com/repos/mofeng-git/One-KVM/releases/tags/${ONE_KVM_TAG}" | \
-            jq -r '.assets[] | select(.name | endswith("_armhf.deb")) | .browser_download_url')
-
-          if [[ -z "$ONE_KVM_DEB_URL" ]]; then
-            echo "Error: armhf deb not found in release ${ONE_KVM_TAG}"
-            exit 1
-          fi
-
-          echo "Downloading from: $ONE_KVM_DEB_URL"
-          curl -L "$ONE_KVM_DEB_URL" -o one-kvm.deb
-
-          dpkg-deb -I one-kvm.deb
-          ls -lh one-kvm.deb
-
-      - name: Download B860 burn base image
-        run: |
-          mkdir -p downloads
-          # Download latest prerelease burn.img.xz
-          LATEST_BURN=$(gh release list \
-            --repo wuhao1477/b860av1-t-armbian-burn-builder \
-            --limit 10 \
-            --json tagName,isPrerelease \
-            --jq '[.[] | select(.isPrerelease == true and (.tagName | startswith("b860-burn-")))] | first | .tagName')
-
-          if [[ -z "$LATEST_BURN" ]]; then
-            echo "Error: No burn prerelease found"
-            exit 1
-          fi
-
-          echo "Downloading from release: $LATEST_BURN"
-          gh release download "$LATEST_BURN" \
+          gh release download "${{ needs.check.outputs.burn_tag }}" \
             --repo wuhao1477/b860av1-t-armbian-burn-builder \
             --pattern 'burn.img.xz' \
-            --pattern 'SHA256SUMS' \
-            --dir downloads/
+            --dir dl/
+          xz -d dl/burn.img.xz
 
-          # Verify and extract
-          cd downloads
-          sha256sum -c SHA256SUMS --ignore-missing
-          xz -d burn.img.xz
-          ls -lh burn.img
+      - name: Download One-KVM
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Integrate One-KVM into burn image
-        env:
-          ONE_KVM_DEB: ${{ github.workspace }}/one-kvm.deb
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # TODO: 实现 One-KVM 集成脚本
-          # 当前先直接重命名基础镜像作为临时方案
-          mkdir -p output
-          cp downloads/burn.img output/
-          cd output
-          mv burn.img "B860-One-KVM-${{ steps.vars.outputs.build_tag }}.img"
-          xz -9 -T0 "B860-One-KVM-${{ steps.vars.outputs.build_tag }}.img"
-          sha256sum *.img.xz > SHA256SUMS
+          gh release download "${{ needs.check.outputs.onekvm_tag }}" \
+            --repo mofeng-git/One-KVM \
+            --pattern '*_armhf.deb' \
+            --dir dl/
 
-      - name: Create release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.vars.outputs.build_tag }}
-          name: B860 One-KVM ${{ steps.vars.outputs.build_tag }}
-          body: |
-            B860AV1.1-T One-KVM 开箱即用固件
+      - name: Integrate One-KVM
+        run: |
+          .tools/bin/ampack unpack dl/burn.img work/
+          sudo losetup -f --show work/data.PARTITION > loop.txt
+          LOOP=$(cat loop.txt)
+          sudo mount $LOOP mnt/
+          sudo cp dl/*.deb mnt/tmp/
+          sudo chroot mnt/ bash -c 'dpkg -i /tmp/*.deb && systemctl enable one-kvm'
+          sudo umount mnt/
+          sudo losetup -d $LOOP
+          .tools/bin/ampack pack --verify work/ out/burn.img
+          cd out && xz -9 -T0 burn.img && sha256sum burn.img.xz > SHA256SUMS
 
-            **One-KVM**: [${{ steps.vars.outputs.one_kvm_tag }}](https://github.com/mofeng-git/One-KVM/releases/tag/${{ steps.vars.outputs.one_kvm_tag }})
-            **Base**: B860 Armbian (ophub) with meson_hcodec V4L2 encoder
-
-            ## 特性
-
-            - ✅ One-KVM 预装并启用
-            - ✅ V4L2 硬件编码器（/dev/video0）已配置
-            - ✅ 开箱即用，刷完直接访问 http://<IP>:8080
-
-            ## 刷机
-
-            1. 解压 `*.img.xz`
-            2. 使用晶晨烧录工具刷入 B860AV1.1-T
-            3. 开机后访问 One-KVM：http://<设备IP>:8080
-
-            默认凭据：`admin` / `admin`
-          files: |
-            output/*.img.xz
-            output/SHA256SUMS
-          draft: false
-          prerelease: false
+      - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="onekvm-${{ needs.check.outputs.onekvm_tag }}-base-${{ needs.check.outputs.burn_tag }}"
+          BODY="One-KVM ${{ needs.check.outputs.onekvm_tag }} + Base ${{ needs.check.outputs.burn_tag }}
+
+          Input fingerprint: ${{ needs.check.outputs.fingerprint }}"
+
+          gh release create "$TAG" out/burn.img.xz out/SHA256SUMS \
+            --repo ${{ github.repository }} \
+            --title "B860 One-KVM $TAG" \
+            --notes "$BODY"
