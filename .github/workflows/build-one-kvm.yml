@@ -43,7 +43,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y xz-utils kpartx android-sdk-libsparse-utils
+          sudo apt-get install -y xz-utils kpartx android-sdk-libsparse-utils qemu-user-static binfmt-support
           ./scripts/setup-image-tools.sh
 
       - name: Download base burn.img
@@ -73,8 +73,10 @@ jobs:
           sudo losetup -f --show work/data.img > loop.txt
           LOOP=$(cat loop.txt)
           sudo mount $LOOP mnt/
+          sudo cp /usr/bin/qemu-aarch64-static mnt/usr/bin/
           sudo cp dl/*.deb mnt/tmp/
           sudo chroot mnt/ bash -c 'dpkg -i /tmp/*.deb && systemctl enable one-kvm'
+          sudo rm mnt/usr/bin/qemu-aarch64-static
           sudo umount mnt/
           sudo losetup -d $LOOP
           img2simg work/data.img work/data.PARTITION
