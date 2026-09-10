@@ -76,6 +76,8 @@ jobs:
           sudo cp /usr/bin/qemu-aarch64-static mnt/usr/bin/
           sudo cp dl/*.deb mnt/tmp/
           sudo chroot mnt/ bash -c 'dpkg -i /tmp/*.deb && systemctl enable one-kvm'
+          sudo chroot mnt/ bash -c 'usermod -aG video root'
+          echo 'KERNEL=="hidraw*", GROUP="input", MODE="0660"' | sudo tee mnt/etc/udev/rules.d/99-hidraw.rules
           sudo rm mnt/usr/bin/qemu-aarch64-static
           sudo umount mnt/
           sudo losetup -d $LOOP
