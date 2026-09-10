@@ -45,10 +45,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xz-utils kpartx android-sdk-libsparse-utils qemu-user-static binfmt-support
 
-          # Install ampack
+      - name: Download and build ampack
+        run: |
           mkdir -p .tools/bin
-          curl -L "https://github.com/7Ji/ampart/releases/download/v1.4/ampack-amd64-static" -o .tools/bin/ampack
-          chmod +x .tools/bin/ampack
+          git clone --filter=blob:none https://github.com/7Ji/ampart.git .tools/ampart-src
+          cd .tools/ampart-src
+          git checkout 71a7ca46fa75c31e3eef4895f0e90c77a815e9aa
+          cargo build --release
+          install -m 0755 target/release/ampack ../../.tools/bin/ampack
+          cd ../..
           echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
 
       - name: Download base burn.img
