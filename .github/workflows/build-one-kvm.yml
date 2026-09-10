@@ -44,7 +44,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xz-utils kpartx android-sdk-libsparse-utils qemu-user-static binfmt-support
-          ./scripts/setup-image-tools.sh
+
+          # Install ampack
+          mkdir -p .tools/bin
+          AMPACK_URL="https://github.com/7Ji/ampart/releases/latest/download/ampack-amd64-static"
+          curl -L "$AMPACK_URL" -o .tools/bin/ampack
+          chmod +x .tools/bin/ampack
 
       - name: Download base burn.img
         env:
