@@ -59,6 +59,7 @@ jobs:
           ONE_KVM_TAG: ${{ steps.vars.outputs.one_kvm_tag }}
           WORK_DIR: ${{ github.workspace }}/work-local
           OUTPUT_DIR: ${{ github.workspace }}/output
+          GH_TOKEN: ${{ github.token }}
         run: |
           chmod +x scripts/build-one-kvm-local.sh
           ./scripts/build-one-kvm-local.sh

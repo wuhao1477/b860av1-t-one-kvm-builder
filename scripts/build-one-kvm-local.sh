@@ -8,6 +8,9 @@ set -Eeuo pipefail
 : "${ONE_KVM_TAG:?ONE_KVM_TAG is required}"
 : "${WORK_DIR:=$PWD/work-local}"
 : "${OUTPUT_DIR:=$PWD/output}"
+: "${GH_TOKEN:?GH_TOKEN is required for gh CLI}"
+
+export GH_TOKEN
 
 echo "==> 构建参数"
 echo "B860 Tag: $B860_TAG"
