@@ -62,7 +62,7 @@ jobs:
         run: |
           gh release download "${{ needs.check.outputs.onekvm_tag }}" \
             --repo mofeng-git/One-KVM \
-            --pattern '*_armhf.deb' \
+            --pattern '*_arm64.deb' \
             --dir dl/
 
       - name: Integrate One-KVM
