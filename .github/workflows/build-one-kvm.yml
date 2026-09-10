@@ -85,13 +85,41 @@ jobs:
           sudo mount $LOOP mnt/
           sudo cp /usr/bin/qemu-aarch64-static mnt/usr/bin/
           sudo cp dl/*.deb mnt/tmp/
+
+          # Install One-KVM
           sudo chroot mnt/ bash -c 'dpkg -i /tmp/*.deb && systemctl enable one-kvm'
           sudo chroot mnt/ bash -c 'usermod -aG video root'
 
+          # Create One-KVM config with hardware encoder
+          sudo mkdir -p mnt/etc/one-kvm
+          sudo tee mnt/etc/one-kvm/config.toml >/dev/null <<'TOML'
+          [streamer]
+          # B860 Amlogic S905L3-B 硬件编码器
+          desired_fps = 30
+          video_device = "/dev/video0"
+          encoder = "v4l2m2m"
+
+          [streamer.quality_presets.high]
+          resolution = [1920, 1080]
+          bitrate = "4M"
+
+          [streamer.quality_presets.medium]
+          resolution = [1280, 720]
+          bitrate = "2M"
+
+          [streamer.quality_presets.low]
+          resolution = [854, 480]
+          bitrate = "1M"
+          TOML
+
           # Add V4L2 M2M environment variable to One-KVM service
           sudo mkdir -p mnt/etc/systemd/system/one-kvm.service.d
-          echo -e '[Service]\nEnvironment="ONE_KVM_V4L2M2M_ALLOW=1"' | sudo tee mnt/etc/systemd/system/one-kvm.service.d/10-amlogic-encoder.conf
+          sudo tee mnt/etc/systemd/system/one-kvm.service.d/10-amlogic-encoder.conf >/dev/null <<'CONF'
+          [Service]
+          Environment="ONE_KVM_V4L2M2M_ALLOW=1"
+          CONF
 
+          # udev rule for hidraw
           echo 'KERNEL=="hidraw*", GROUP="input", MODE="0660"' | sudo tee mnt/etc/udev/rules.d/99-hidraw.rules
 
           # Configure USB OTG device mode for One-KVM
@@ -125,6 +153,10 @@ jobs:
         run: |
           TAG="onekvm-${{ needs.check.outputs.onekvm_tag }}-base-${{ needs.check.outputs.burn_tag }}-$(date -u +%Y%m%d%H%M)"
           BODY="One-KVM ${{ needs.check.outputs.onekvm_tag }} + Base ${{ needs.check.outputs.burn_tag }}
+
+          ✅ USB OTG device mode enabled
+          ✅ Hardware encoder (/dev/video0) configured
+          ✅ HCODEC waitms=2000 included in base image
 
           Input fingerprint: ${{ needs.check.outputs.fingerprint }}"
 
