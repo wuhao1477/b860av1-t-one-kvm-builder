@@ -95,20 +95,20 @@ jobs:
           echo 'KERNEL=="hidraw*", GROUP="input", MODE="0660"' | sudo tee mnt/etc/udev/rules.d/99-hidraw.rules
 
           # Configure USB OTG device mode for One-KVM
-          cat <<'EOF' | sudo tee mnt/etc/systemd/system/usb-otg-device-mode.service
-[Unit]
-Description=Switch USB to Device Mode for OTG
-Before=one-kvm.service
-After=local-fs.target
+          sudo tee mnt/etc/systemd/system/usb-otg-device-mode.service >/dev/null <<'UNITFILE'
+          [Unit]
+          Description=Switch USB to Device Mode for OTG
+          Before=one-kvm.service
+          After=local-fs.target
 
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c "echo device > /sys/devices/platform/soc/d0078080.usb/usb_role/d0078080.usb-role-switch/role"
-RemainAfterExit=yes
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c "echo device > /sys/devices/platform/soc/d0078080.usb/usb_role/d0078080.usb-role-switch/role"
+          RemainAfterExit=yes
 
-[Install]
-WantedBy=multi-user.target
-EOF
+          [Install]
+          WantedBy=multi-user.target
+          UNITFILE
           sudo chroot mnt/ bash -c 'systemctl enable usb-otg-device-mode.service'
 
           sudo rm mnt/usr/bin/qemu-aarch64-static
