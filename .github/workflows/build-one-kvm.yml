@@ -93,6 +93,24 @@ jobs:
           echo -e '[Service]\nEnvironment="ONE_KVM_V4L2M2M_ALLOW=1"' | sudo tee mnt/etc/systemd/system/one-kvm.service.d/10-amlogic-encoder.conf
 
           echo 'KERNEL=="hidraw*", GROUP="input", MODE="0660"' | sudo tee mnt/etc/udev/rules.d/99-hidraw.rules
+
+          # Configure USB OTG device mode for One-KVM
+          cat <<'EOF' | sudo tee mnt/etc/systemd/system/usb-otg-device-mode.service
+[Unit]
+Description=Switch USB to Device Mode for OTG
+Before=one-kvm.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "echo device > /sys/devices/platform/soc/d0078080.usb/usb_role/d0078080.usb-role-switch/role"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+          sudo chroot mnt/ bash -c 'systemctl enable usb-otg-device-mode.service'
+
           sudo rm mnt/usr/bin/qemu-aarch64-static
           sudo umount mnt/
           sudo losetup -d $LOOP
