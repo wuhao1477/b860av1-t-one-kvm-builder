@@ -123,7 +123,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="onekvm-${{ needs.check.outputs.onekvm_tag }}-base-${{ needs.check.outputs.burn_tag }}"
+          TAG="onekvm-${{ needs.check.outputs.onekvm_tag }}-base-${{ needs.check.outputs.burn_tag }}-$(date -u +%Y%m%d%H%M)"
           BODY="One-KVM ${{ needs.check.outputs.onekvm_tag }} + Base ${{ needs.check.outputs.burn_tag }}
 
           Input fingerprint: ${{ needs.check.outputs.fingerprint }}"
