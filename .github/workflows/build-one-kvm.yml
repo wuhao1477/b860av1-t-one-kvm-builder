@@ -99,6 +99,10 @@ jobs:
           video_device = "/dev/video0"
           encoder = "v4l2m2m"
 
+          [streamer.v4l2m2m_params]
+          h264_i_frame_qp = 26
+          h264_p_frame_qp = 28
+
           [streamer.quality_presets.high]
           resolution = [1920, 1080]
           bitrate = "4M"
