@@ -47,9 +47,9 @@ jobs:
 
           # Install ampack
           mkdir -p .tools/bin
-          AMPACK_URL="https://github.com/7Ji/ampart/releases/latest/download/ampack-amd64-static"
-          curl -L "$AMPACK_URL" -o .tools/bin/ampack
+          curl -L "https://github.com/7Ji/ampart/releases/download/v1.4/ampack-amd64-static" -o .tools/bin/ampack
           chmod +x .tools/bin/ampack
+          echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
 
       - name: Download base burn.img
         env:
