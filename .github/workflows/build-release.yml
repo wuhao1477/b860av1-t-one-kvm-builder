@@ -33,7 +33,8 @@ jobs:
             git curl jq xz-utils nodejs npm \
             gcc-aarch64-linux-gnu \
             mtools dosfstools e2fsprogs kmod device-tree-compiler \
-            python3 bc bison flex make libssl-dev
+            python3 bc bison flex make libssl-dev \
+            android-sdk-libsparse-utils qemu-user-static binfmt-support kpartx
 
       - name: Set variables
         id: vars
