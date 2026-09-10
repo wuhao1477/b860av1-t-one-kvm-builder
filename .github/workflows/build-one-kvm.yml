@@ -43,7 +43,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y xz-utils kpartx
+          sudo apt-get install -y xz-utils kpartx android-sdk-libsparse-utils
           ./scripts/setup-image-tools.sh
 
       - name: Download base burn.img
@@ -69,13 +69,16 @@ jobs:
         run: |
           mkdir -p mnt out
           .tools/bin/ampack unpack dl/burn.img work/
-          sudo losetup -f --show work/data.PARTITION > loop.txt
+          simg2img work/data.PARTITION work/data.img
+          sudo losetup -f --show work/data.img > loop.txt
           LOOP=$(cat loop.txt)
           sudo mount $LOOP mnt/
           sudo cp dl/*.deb mnt/tmp/
           sudo chroot mnt/ bash -c 'dpkg -i /tmp/*.deb && systemctl enable one-kvm'
           sudo umount mnt/
           sudo losetup -d $LOOP
+          img2simg work/data.img work/data.PARTITION
+          rm work/data.img
           .tools/bin/ampack pack --verify work/ out/burn.img
           cd out && xz -9 -T0 burn.img && sha256sum burn.img.xz > SHA256SUMS
 
