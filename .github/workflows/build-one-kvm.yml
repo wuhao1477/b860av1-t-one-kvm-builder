@@ -90,32 +90,15 @@ jobs:
           sudo chroot mnt/ bash -c 'dpkg -i /tmp/*.deb && systemctl enable one-kvm'
           sudo chroot mnt/ bash -c 'usermod -aG video root'
 
-          # Create One-KVM config with hardware encoder
-          sudo mkdir -p mnt/etc/one-kvm
-          sudo tee mnt/etc/one-kvm/config.toml >/dev/null <<'TOML'
-          [streamer]
-          # B860 Amlogic S905L3-B 硬件编码器
-          desired_fps = 30
-          video_device = "/dev/video0"
-          encoder = "v4l2m2m"
-
-          [streamer.v4l2m2m_params]
-          # 实测下限：1280x768 需 QP>=34，低于此值 ucode 会在宏块上卡死
-          h264_i_frame_qp = 34
-          h264_p_frame_qp = 36
-
-          [streamer.quality_presets.high]
-          resolution = [1280, 720]
-          bitrate = "2.5M"
-
-          [streamer.quality_presets.medium]
-          resolution = [1024, 576]
-          bitrate = "1.5M"
-
-          [streamer.quality_presets.low]
-          resolution = [854, 480]
-          bitrate = "1M"
-          TOML
+          # One-KVM 的真配置在 /etc/one-kvm/one-kvm.db（SQLite），不是 config.toml。
+          # 实测：streamer / video_device / desired_fps / h264_i_frame_qp /
+          # quality_presets 这些键在 one-kvm 二进制里一个都不存在（strings 全查过），
+          # 以前写的 config.toml 从头到尾被静默忽略。视频参数请在 Web UI 里改，
+          # 首次启动时 one-kvm 会自己建库并写入默认值。
+          #
+          # 编码器侧的参数走内核模块：/etc/modprobe.d/meson_hcodec.conf 由 base
+          # 镜像的 scripts/apply-rootfs-defaults.sh 写好（stage=1 selftest=0
+          # waitms=300），这里不要再写第二个文件去覆盖它。
 
           # Add V4L2 M2M environment variable to One-KVM service
           sudo mkdir -p mnt/etc/systemd/system/one-kvm.service.d
@@ -126,9 +109,6 @@ jobs:
 
           # udev rule for hidraw
           echo 'KERNEL=="hidraw*", GROUP="input", MODE="0660"' | sudo tee mnt/etc/udev/rules.d/99-hidraw.rules
-
-          # hcodec 每帧超时 300ms（实测编通一帧 7ms）；2000ms 会让 3 次重试白等 10 秒
-          echo 'options meson_hcodec waitms=300' | sudo tee mnt/etc/modprobe.d/meson-hcodec.conf
 
           # Configure USB OTG device mode for One-KVM
           sudo tee mnt/etc/systemd/system/usb-otg-device-mode.service >/dev/null <<'UNITFILE'
@@ -166,8 +146,11 @@ jobs:
           BODY="One-KVM ${{ needs.check.outputs.onekvm_tag }} + Base ${{ needs.check.outputs.burn_tag }}
 
           ✅ USB OTG device mode enabled
-          ✅ Hardware encoder (/dev/video0) configured
-          ✅ HCODEC waitms=2000 included in base image
+          ✅ SSH host keys pre-generated
+          ✅ HCODEC 硬编：码率控制按实测帧间隔算预算（QP 不再锁死 51）
+          ✅ HCODEC waitms=300（编通一帧实测 7 ms）
+
+          视频分辨率 / 帧率 / 编码器在 Web UI 里设置（真配置在 one-kvm.db）。
 
           Input fingerprint: ${{ needs.check.outputs.fingerprint }}"
 
