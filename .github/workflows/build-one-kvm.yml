@@ -100,8 +100,9 @@ jobs:
           encoder = "v4l2m2m"
 
           [streamer.v4l2m2m_params]
-          h264_i_frame_qp = 28
-          h264_p_frame_qp = 30
+          # 实测下限：1280x768 需 QP>=34，低于此值 ucode 会在宏块上卡死
+          h264_i_frame_qp = 34
+          h264_p_frame_qp = 36
 
           [streamer.quality_presets.high]
           resolution = [1280, 720]
@@ -125,6 +126,9 @@ jobs:
 
           # udev rule for hidraw
           echo 'KERNEL=="hidraw*", GROUP="input", MODE="0660"' | sudo tee mnt/etc/udev/rules.d/99-hidraw.rules
+
+          # hcodec 每帧超时 300ms（实测编通一帧 7ms）；2000ms 会让 3 次重试白等 10 秒
+          echo 'options meson_hcodec waitms=300' | sudo tee mnt/etc/modprobe.d/meson-hcodec.conf
 
           # Configure USB OTG device mode for One-KVM
           sudo tee mnt/etc/systemd/system/usb-otg-device-mode.service >/dev/null <<'UNITFILE'
