@@ -127,8 +127,9 @@ jobs:
           UNITFILE
           sudo chroot mnt/ bash -c 'systemctl enable usb-otg-device-mode.service'
 
-          # Generate SSH host keys
-          sudo chroot mnt/ bash -c 'ssh-keygen -A'
+          # Host keys are generated on each board at boot by sshd-keygen.service.
+          # The base image clears its broken ConditionFirstBoot=yes; generating keys here would
+          # both need /dev in the chroot and publish the same private host keys to every board.
 
           sudo rm mnt/usr/bin/qemu-aarch64-static
           sudo umount mnt/
@@ -146,7 +147,7 @@ jobs:
           BODY="One-KVM ${{ needs.check.outputs.onekvm_tag }} + Base ${{ needs.check.outputs.burn_tag }}
 
           ✅ USB OTG device mode enabled
-          ✅ SSH host keys pre-generated
+          ✅ SSH host keys generated per device on first boot
           ✅ HCODEC 硬编：码率控制按实测帧间隔算预算（QP 不再锁死 51）
           ✅ HCODEC waitms=300（编通一帧实测 7 ms）
 
