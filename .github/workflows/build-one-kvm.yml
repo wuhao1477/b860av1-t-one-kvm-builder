@@ -100,16 +100,16 @@ jobs:
           encoder = "v4l2m2m"
 
           [streamer.v4l2m2m_params]
-          h264_i_frame_qp = 26
-          h264_p_frame_qp = 28
+          h264_i_frame_qp = 28
+          h264_p_frame_qp = 30
 
           [streamer.quality_presets.high]
-          resolution = [1920, 1080]
-          bitrate = "4M"
+          resolution = [1280, 720]
+          bitrate = "2.5M"
 
           [streamer.quality_presets.medium]
-          resolution = [1280, 720]
-          bitrate = "2M"
+          resolution = [1024, 576]
+          bitrate = "1.5M"
 
           [streamer.quality_presets.low]
           resolution = [854, 480]
@@ -142,6 +142,9 @@ jobs:
           WantedBy=multi-user.target
           UNITFILE
           sudo chroot mnt/ bash -c 'systemctl enable usb-otg-device-mode.service'
+
+          # Generate SSH host keys
+          sudo chroot mnt/ bash -c 'ssh-keygen -A'
 
           sudo rm mnt/usr/bin/qemu-aarch64-static
           sudo umount mnt/
